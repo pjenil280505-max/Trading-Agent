@@ -11,7 +11,10 @@
     "ponytail@ponytail": true,
     "agent-skills@addy-agent-skills": true
   },
-  "enabledMcpjsonServers": ["omniroute"],
+  "enabledMcpjsonServers": ["omniroute", "vibe-trading"],
+  "env": {
+    "MCP_TIMEOUT": "180000"
+  },
   "hooks": {
     "SessionStart": [
       {

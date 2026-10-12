@@ -3,6 +3,10 @@
     "omniroute": {
       "type": "http",
       "url": "http://localhost:20128/api/mcp/stream"
+    },
+    "vibe-trading": {
+      "command": "uvx",
+      "args": ["--from", "vibe-trading-ai", "vibe-trading-mcp"]
     }
   }
 }
