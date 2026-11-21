@@ -304,14 +304,13 @@ class AgentService:
     def _ask(self, provider_id: int, role: str, user: str, evidence: dict[str, Any] | None, *, workflow: str) -> dict[str, Any]:
         client = self.providers.client(provider_id)
         system = SYSTEM.format(title=ROLES[role].split(" — ")[0], role=f"{role}. {ROLES[role]}")
+        res = client.chat(system, [{"role": "user", "content": user}])  # tokens are billed even if parsing fails
         try:
-            res = client.chat(system, [{"role": "user", "content": user}])
-            raw = extract_json(res.text)
-            out = normalise(raw, evidence)
+            out = normalise(extract_json(res.text), evidence)
             status = "ok"
         except ValidationError as exc:
-            out = {"error": exc.message, "label": "AI output could not be parsed", "stance": "neutral", "confidence": 0.0}
-            res = None
+            out = {"error": exc.message, "label": "AI output could not be parsed", "stance": "neutral", "confidence": 0.0,
+                   "raw_preview": res.text[:300]}
             status = "parse_error"
         cost = self.providers.cost(client.row, res.tokens_in, res.tokens_out) if res else 0.0
         self.db.execute(

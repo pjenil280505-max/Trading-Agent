@@ -115,10 +115,13 @@ def test_real_local_model_via_ollama(st):
     st.ai.set_enabled(p["id"], True)
     out = st.agents.analyze(p["id"], "TEST:ABC", timeframe="1m")
     res = out["result"]
+    # a 0.5B model sometimes returns unparsable JSON; that must be reported, and its tokens still counted
     assert res["_meta"]["is_local"] is True and res["_meta"]["cost_usd"] == 0
-    assert res["_meta"]["tokens_in"] > 100
+    assert res["_meta"]["tokens_in"] > 100 and res["_meta"]["tokens_out"] > 0
     assert res["stance"] in ("bullish", "bearish", "neutral")
-    assert res["label"].startswith("AI-generated") or "error" in res
+    assert res["label"].startswith("AI-generated") or res["label"] == "AI output could not be parsed"
+    row = st.db.query_one("SELECT status, tokens_in FROM ai_runs ORDER BY id DESC LIMIT 1")
+    assert row["status"] in ("ok", "parse_error") and row["tokens_in"] > 100
 
 
 # ---------------------------------------------------------------- MCP client against a real stdio server
