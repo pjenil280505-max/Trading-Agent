@@ -1,0 +1,12 @@
+{
+  "id": "org.openmarketos.example.okx-rest-feed",
+  "name": "OKX candles via the generic REST plugin",
+  "version": "1.0.0",
+  "author": "Open Market OS examples",
+  "license": "Apache-2.0",
+  "kind": "data_provider_rest",
+  "entry": "provider.json",
+  "description": "Shows how to describe any JSON candle API declaratively. Uses OKX's public endpoint.",
+  "omos_version": ">=0.1.0",
+  "permissions": ["network:www.okx.com"]
+}

@@ -1,0 +1,5 @@
+# EMA ribbon: four exponential moving averages
+plot(ema(close, 8), "ema8")
+plot(ema(close, 21), "ema21")
+plot(ema(close, 55), "ema55")
+plot(ema(close, 89), "ema89")

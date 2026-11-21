@@ -1,0 +1,12 @@
+{
+  "id": "org.openmarketos.example.zscore",
+  "name": "Rolling Z-score (process plugin)",
+  "version": "1.0.0",
+  "author": "Open Market OS examples",
+  "license": "Apache-2.0",
+  "kind": "process",
+  "entry": "main.py",
+  "description": "Computes a rolling z-score in a separate process. Demonstrates the JSON-RPC process plugin protocol.",
+  "omos_version": ">=0.1.0",
+  "permissions": ["compute"]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "org.openmarketos.example.ema-ribbon",
+  "name": "EMA Ribbon",
+  "version": "1.0.0",
+  "author": "Open Market OS examples",
+  "license": "Apache-2.0",
+  "kind": "indicator",
+  "entry": "ribbon.oms",
+  "description": "Four EMAs (8/21/55/89) as an overlay. Example of a sandboxed OMS Script indicator plugin.",
+  "omos_version": ">=0.1.0",
+  "permissions": ["read:market_data"]
+}

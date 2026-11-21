@@ -190,6 +190,20 @@ class MarketDataService:
         for name in self.providers:
             self.health.setdefault(name, Health(name))
 
+    def register_provider(self, provider: Provider) -> None:
+        """Add a plugin-supplied provider. Built-in names cannot be replaced."""
+        if provider.name in DEFAULT_PROVIDER_SETTINGS:
+            raise ValidationError(f"'{provider.name}' is a built-in provider name")
+        self.providers[provider.name] = provider
+        self.health.setdefault(provider.name, Health(provider.name))
+
+    def unregister_provider(self, name: str) -> None:
+        if name in DEFAULT_PROVIDER_SETTINGS:
+            return
+        p = self.providers.pop(name, None)
+        if p:
+            p.close()
+
     def provider(self, name: str) -> Provider:
         p = self.providers.get(name.upper())
         if not p:

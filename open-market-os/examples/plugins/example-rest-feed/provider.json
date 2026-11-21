@@ -1,0 +1,12 @@
+{
+  "name": "OKXPLUG",
+  "display_name": "OKX (generic REST plugin example)",
+  "status": "DELAYED",
+  "url": "https://www.okx.com/api/v5/market/candles?instId={symbol}&bar={interval}&limit={limit}",
+  "intervals": {"1m": "1m", "1h": "1H"},
+  "rows": "data",
+  "fields": {"t": 0, "o": 1, "h": 2, "l": 3, "c": 4, "v": 5},
+  "time_unit": "ms",
+  "asset_class": "crypto",
+  "rate_per_s": 2
+}
