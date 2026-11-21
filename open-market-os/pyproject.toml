@@ -49,6 +49,7 @@ omos = ["storage/migrations/*.sql", "web/dist/**/*", "data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "tests"]
 timeout = 120
 markers = [
   "network: hits real public data sources (deselect with -m 'not network')",
