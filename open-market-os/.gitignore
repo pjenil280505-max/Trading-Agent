@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+web/node_modules/
+web/dist/
+src/omos/web/dist/
+.omos-test/
+*.db
+*.db-wal
+*.db-shm
+releases/*.tar.gz
+releases/omos-linux-x86_64
