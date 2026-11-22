@@ -113,7 +113,16 @@ def cmd_start(args) -> int:
         prov["SIM"] = {"enabled": True}
         db.set_setting("data.providers", prov)
         db.close()
+    from omos.storage.backup import apply_pending_restore
+    restored = apply_pending_restore(cfg.data_path, cfg.db_path, cfg.backups_path)
     host = Host(cfg)
+    if restored:
+        if restored["ok"]:
+            host.notifier.notify("Backup restored", f"Restored {restored['restored']}. Your data from before the restore was "
+                                 f"saved as {restored['safety_copy']}: restore that one to undo.", category="system")
+        else:
+            host.notifier.notify("Restore failed", f"Your data was not changed: {restored['error']}", level="warning",
+                                 category="system")
     app = create_app(host)
     url = _bootstrap_url(cfg)
     print(f"\n  Open Market OS {__version__} is running.\n  Open this link to sign in (valid 10 minutes, single use):\n\n    {url}\n")

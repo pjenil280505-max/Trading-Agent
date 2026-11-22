@@ -51,6 +51,8 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Run]
 Filename: "{app}\omos.exe"; Parameters: "autostart on --quiet"; Flags: runhidden; Tasks: autostart; StatusMsg: "Setting up start at sign-in..."
 Filename: "{app}\{#AppExe}"; Description: "Open {#AppName} now"; Flags: nowait postinstall skipifsilent
+; an in-app update runs the installer with /RELAUNCH=1: start the app again afterwards
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: RelaunchRequested
 
 [UninstallRun]
 Filename: "{app}\omos.exe"; Parameters: "stop --quiet"; Flags: runhidden waituntilterminated; RunOnceId: "StopApp"
@@ -60,6 +62,11 @@ Filename: "{app}\omos.exe"; Parameters: "autostart off --quiet"; Flags: runhidde
 Type: filesandordirs; Name: "{app}\_internal"
 
 [Code]
+function RelaunchRequested: Boolean;
+begin
+  Result := Pos('/RELAUNCH=1', UpperCase(GetCmdTail)) > 0;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;

@@ -177,6 +177,65 @@ def diagnostics(request: Request, info=Depends(ADMIN)):
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+@router.post("/backups/restore")
+def restore_backup(request: Request, payload: dict[str, Any] = Body(...), info=Depends(ADMIN)):
+    """Replace all data with a backup: scheduled for the next start, then the app restarts. Undoable: the data
+    being replaced is saved first as a 'before a restore' backup."""
+    from omos.storage.backup import request_restore
+
+    h = H(request)
+    req = request_restore(h.cfg.data_path, h.cfg.backups_path, str(payload.get("file", "")), info.actor)
+    h.db.audit(info.actor, "backup.restore_requested", req["file"], {})
+    if getattr(request.app.state, "server", None) is None:
+        return {**req, "restarting": False, "message": "Restore scheduled: it happens the next time the app starts."}
+    _restart(request, info)
+    return {**req, "restarting": True, "message": "Restoring: the app restarts and reconnects in a few seconds."}
+
+
+# ====================================================================== updates
+def _updater(h):
+    from omos.updates import DEFAULT_REPO, Updater
+    return Updater(h.cfg.data_path, repo=str(h.db.get_setting("updates.repo", DEFAULT_REPO)))
+
+
+@router.get("/updates/check")
+def check_updates(request: Request, info=Depends(READ)):
+    h = H(request)
+    try:
+        res = _updater(h).check()
+    except Exception as exc:  # noqa: BLE001 - offline, rate-limited: say so plainly
+        raise OmosError(f"could not check for updates: {exc}") from exc
+    h.db.set_setting("updates.last_check", {"at": now_ms(), "result": {k: res.get(k) for k in ("available", "latest")}})
+    return res
+
+
+@router.post("/updates/install")
+def install_update(request: Request, info=Depends(ADMIN)):
+    """Download the update for this computer, verify it, back up all data, then install it (a background job)."""
+    from omos.storage.backup import backup_database
+    from omos.updates import Updater
+
+    h = H(request)
+    up = _updater(h)
+    srv = getattr(request.app.state, "server", None)
+
+    def run(job):
+        job.update(1, "Checking for the newest version")
+        res = up.check()
+        if not res["available"]:
+            raise OmosError(res.get("message") or "this is the newest version")
+        path = up.download(res, job)
+        job.update(92, "Verified. Backing up your data before updating")
+        backup = backup_database(h.cfg.db_path, h.cfg.backups_path, label="pre-update")
+        h.db.audit(info.actor, "update.install", res["latest"], {"file": path.name, "backup": backup.name})
+        out = Updater.install(path)
+        if out["how"] == "restart" and srv is not None:
+            _restart(request, info)
+        return {**out, "version": res["latest"], "backup": backup.name}
+
+    return h.jobs.start("update", "Update Open Market OS", run).to_dict()
+
+
 # ====================================================================== first-run setup
 def _system_summary(h) -> dict[str, Any]:
     d = h.device

@@ -99,13 +99,54 @@ def recover_corrupted(db_path: Path, backups_dir: Path) -> Path | None:
     return None
 
 
+RESTORE_MARKER = "restore-pending.json"
+RESTORE_RESULT = "restore-result.json"
+
+
+def request_restore(data_dir: Path, backups_dir: Path, name: str, actor: str) -> dict:
+    """Schedule a restore for the next start (the database must not be in use when it is replaced)."""
+    import json
+
+    target = (backups_dir / name).resolve()
+    if target.parent != backups_dir.resolve() or not target.name.startswith("omos-") or target.suffix != ".db":
+        raise ValidationError("choose one of the backups listed in Settings > Backups")
+    if not target.is_file():
+        raise ValidationError(f"backup not found: {name}")
+    check = verify_database(target)
+    if check != "ok":
+        raise ValidationError(f"this backup cannot be restored: {check}")
+    info = {"file": target.name, "requested_at": int(datetime.now(timezone.utc).timestamp() * 1000), "actor": actor}
+    (data_dir / RESTORE_MARKER).write_text(json.dumps(info))
+    return info
+
+
+def apply_pending_restore(data_dir: Path, db_path: Path, backups_dir: Path) -> dict | None:
+    """Called at start-up before the database opens. Returns what happened, or None if nothing was pending."""
+    import json
+
+    marker = data_dir / RESTORE_MARKER
+    if not marker.exists():
+        return None
+    try:
+        info = json.loads(marker.read_text())
+        safety = restore_database(backups_dir / Path(str(info["file"])).name, db_path, backups_dir)
+        result = {"ok": True, "restored": info["file"], "safety_copy": safety.name if safety else None}
+    except Exception as exc:  # noqa: BLE001 - never block start-up; report instead
+        result = {"ok": False, "error": str(exc)[:300]}
+    marker.unlink(missing_ok=True)
+    (data_dir / RESTORE_RESULT).write_text(json.dumps(result))
+    return result
+
+
 def list_backups(backups_dir: Path) -> list[dict]:
     if not backups_dir.exists():
         return []
     out = []
     for f in sorted(backups_dir.glob("omos-*.db"), reverse=True):
         st = f.stat()
-        out.append({"file": f.name, "bytes": st.st_size, "modified": int(st.st_mtime * 1000)})
+        kind = "before a restore" if "-pre-restore" in f.name else "automatic" if "-auto" in f.name else \
+            "before an update" if "-pre-update" in f.name else "manual"
+        out.append({"file": f.name, "bytes": st.st_size, "modified": int(st.st_mtime * 1000), "kind": kind})
     return out
 
 

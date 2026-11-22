@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { del, get, patch, post, put } from '../api'
 import { Badge, Btn, Card, Confirm, Empty, ErrorBox, Field, Modal, StatusBadge, Tabs, useLoad } from '../components/ui'
 import { can, errText, fmtNum, fmtTime, prefs, toast, useStore } from '../store'
-import { LocalAIPanel, SystemControls } from './Setup'
+import { LocalAIPanel, SystemControls, Updates } from './Setup'
 import qrcode from 'qrcode-generator'
 
 type Tab = 'general' | 'data' | 'devices' | 'secrets' | 'ai' | 'mcp' | 'plugins' | 'backups' | 'live' | 'audit'
@@ -62,6 +62,7 @@ function General() {
       </div>}
     </Card>
     {can('admin') && <SystemControls />}
+    {can('admin') && <Updates />}
     </>
   )
 }
@@ -369,17 +370,30 @@ function Plugins() {
 function Backups() {
   const b = useLoad(() => get<any[]>('/backups'))
   const { s, save } = useSettings()
+  const [restore, setRestore] = useState<any>(null)
   return (
     <Card title="Backups and export" actions={<>
       <Btn sm onClick={async () => { try { const r = await post('/backups'); toast(`Backup written: ${r.file}`, 'ok'); b.reload() } catch (e) { toast(errText(e), 'error') } }}>Back up now</Btn>
       <Btn sm onClick={async () => { try { const r = await post('/export'); toast(`Export written to ${r.path}`, 'ok', 12000) } catch (e) { toast(errText(e), 'error') } }}>Export everything (zip)</Btn></>}>
-      <p class="small muted">Backups are consistent SQLite snapshots in the data folder. Secrets are NOT included in exports (they stay in the keychain/vault). Restore with <code>omos restore &lt;file&gt;</code> while the host is stopped.</p>
+      <p class="small muted">Backups are consistent snapshots of all your data (strategies, accounts, bots, settings) in the data folder. Secrets are NOT included
+        in exports: they stay in the keychain or vault. Restoring replaces all current data with the backup; the current data is saved first, so a restore can be undone.</p>
       {s.data && <div class="row">
         <label class="row small"><input type="checkbox" checked={s.data['backup.auto'] ?? true} onChange={(e) => save({ 'backup.auto': (e.target as HTMLInputElement).checked })} /> daily automatic backup</label>
         <Field label="Keep last"><input type="number" min={1} max={365} style="width:70px" value={s.data['backup.keep'] ?? 14} onChange={(e) => save({ 'backup.keep': Number((e.target as HTMLInputElement).value) })} /></Field>
       </div>}
-      <table class="t"><tbody>{(b.data || []).map((x) => <tr><td class="mono small">{x.file}</td><td class="right">{fmtNum(x.bytes / 1024, 0)} KB</td><td class="small">{fmtTime(x.modified)}</td></tr>)}</tbody></table>
+      <table class="t"><tbody>{(b.data || []).map((x) => <tr><td class="small">{fmtTime(x.modified)}</td><td class="small">{x.kind}</td>
+        <td class="mono small">{x.file}</td><td class="right">{fmtNum(x.bytes / 1024, 0)} KB</td>
+        <td class="right"><Btn sm onClick={() => setRestore(x)}>Restore…</Btn></td></tr>)}</tbody></table>
       {b.data?.length === 0 && <Empty>No backups yet.</Empty>}
+      {restore && <Confirm phrase="RESTORE" text={`Replace ALL current data with the backup from ${fmtTime(restore.modified)} (${restore.kind})? Running bots stop
+        while the app restarts. Your current data is saved first as a "before a restore" backup, so you can undo this.`}
+        onClose={() => setRestore(null)} onConfirm={async () => {
+          try {
+            const r = await post('/backups/restore', { file: restore.file })
+            toast(r.message, 'info', 10000)
+            if (r.restarting) setTimeout(() => { const t = setInterval(async () => { try { if ((await fetch('/api/health')).ok) { clearInterval(t); location.reload() } } catch { /* restarting */ } }, 1000) }, 3000)
+          } catch (e) { toast(errText(e), 'error') }
+        }} />}
     </Card>
   )
 }

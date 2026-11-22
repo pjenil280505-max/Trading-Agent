@@ -258,3 +258,35 @@ export function SetupWizard(p: { onDone: () => void }) {
     </div>
   )
 }
+
+// ============================================================================ updates
+export function Updates() {
+  const [res, setRes] = useState<any>(null)
+  const [err, setErr] = useState<unknown>(null)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const job = useJob(jobId)
+  const check = async () => { setErr(null); try { setRes(await get('/updates/check')) } catch (e) { setErr(e) } }
+  useEffect(() => {
+    if (job?.status === 'succeeded' && job.result?.how === 'restart') setTimeout(() => waitForHost(() => location.reload()), 3000)
+  }, [job?.status])
+  return (
+    <Card title="Updates">
+      <div class="row"><span>This is version <b>{res?.current || '…'}</b>.</span><span class="sp" />
+        <Btn sm onClick={check}>Check for updates</Btn></div>
+      <ErrorBox error={err} />
+      {res && !res.available && <p class="small muted">{res.message || `You have the newest published version${res.latest ? ` (${res.latest})` : ''}.`}</p>}
+      {res?.available && <div class="stack">
+        <div class="alertbox ok">Version <b>{res.latest}</b> is available{res.published_at ? ` (published ${new Date(res.published_at).toLocaleDateString()})` : ''}:
+          {' '}{res.asset.name}, {(res.asset.size / 1e6).toFixed(0)} MB.</div>
+        {res.notes && <details><summary class="small">What's new</summary><pre class="small" style="white-space:pre-wrap">{res.notes}</pre></details>}
+        <p class="small muted">The download is checked against the release's published SHA-256 checksums, and all your data is backed up first
+          ("before an update" in Settings → Backups). To go back, restore that backup and install the previous version from the release page.</p>
+        <div class="row"><Btn kind="primary" disabled={job?.status === 'running'} onClick={async () => {
+          try { setJobId((await post('/updates/install', {})).id) } catch (e) { toast(errText(e), 'error') }
+        }}>Download, verify and install</Btn>{res.page && <a class="small" href={res.page} target="_blank" rel="noopener noreferrer">Release page</a>}</div>
+      </div>}
+      {job && <Progress job={job} />}
+      {job?.status === 'succeeded' && <div class="alertbox">{job.result?.message}</div>}
+    </Card>
+  )
+}
