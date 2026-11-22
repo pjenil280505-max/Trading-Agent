@@ -57,7 +57,7 @@ export function Dashboard() {
         </Card>
         <Card title="Data sources">
           <table class="t"><tbody>{(status.data?.providers || []).map((p: any) => (
-            <tr><td>{p.provider}</td><td><Badge kind={p.status === 'unknown' ? 'HISTORICAL' : p.status}>{p.status}</Badge></td>
+            <tr><td>{p.provider}</td><td><Badge kind={p.status === 'unknown' ? 'HISTORICAL' : p.status}>{p.status === 'unknown' ? 'not used yet' : p.status}</Badge></td>
               <td class="small muted">{p.latency_ms ? `${p.latency_ms.toFixed(0)} ms` : ''}</td><td class="small neg">{p.last_error || ''}</td></tr>
           ))}</tbody></table>
           <div class="small muted" style="margin-top:6px">{status.data?.note_24x7}</div>

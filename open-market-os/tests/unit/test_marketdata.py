@@ -330,3 +330,49 @@ def test_provider_infos_cover_all_providers(db):
     assert infos["SIM"]["enabled"] is False  # simulated data off by default
     assert infos["YAHOO"]["live_status"] == "DELAYED"
     json.dumps(infos)
+
+
+# ---------------------------------------------------------------- forming bar vs cache
+def _clocked_provider(last_bar_offset_bars: int, calls: list):
+    """ControlledProvider whose newest 1m bar is `last_bar_offset_bars` minutes before the current minute."""
+    from helpers import ControlledProvider
+    from omos.util import now_ms
+
+    step = 60_000
+    start = (now_ms() // step) * step - (99 + last_bar_offset_bars) * step
+
+    class Clocked(ControlledProvider):
+        def fetch_candles(self, inst, tf, **kw):
+            calls.append(kw)
+            c = super().fetch_candles(inst, tf, **kw)
+            c.fetched_at = now_ms()
+            return c
+
+    prov = Clocked(start_ms=start)
+    prov.set_closes("ABC", np.linspace(100, 120, 100), open_last=True)
+    return prov
+
+
+def test_cache_hit_keeps_the_forming_bar(db):
+    """Regression: only closed bars are cached, so a cache hit used to drop the current bar and a
+    watchlist 'last price' could silently become the previous close while still labelled REALTIME."""
+    calls: list = []
+    m = MarketDataService(db, providers={"TEST": _clocked_provider(0, calls)})
+    a = m.get_candles("TEST:ABC", "1m", limit=50)
+    assert not a.last_closed and a.close[-1] == pytest.approx(120)
+    n = len(calls)
+    b = m.get_candles("TEST:ABC", "1m", limit=50, max_age_s=30)
+    assert len(calls) == n                                   # served from cache ...
+    assert int(b.ts[-1]) == int(a.ts[-1]) and b.close[-1] == pytest.approx(120)  # ... with the forming bar
+    assert not b.last_closed and b.status == DataStatus.REALTIME
+    assert len(b) == 50
+
+
+def test_forming_bar_that_has_closed_forces_a_refresh(db):
+    calls: list = []
+    m = MarketDataService(db, providers={"TEST": _clocked_provider(3, calls)})  # "forming" bar is 3 minutes old
+    m.get_candles("TEST:ABC", "1m", limit=50)
+    n = len(calls)
+    c = m.get_candles("TEST:ABC", "1m", limit=50, max_age_s=30)
+    assert len(calls) == n + 1                               # its period ended: fetch again, never serve it stale
+    assert c.close[-1] == pytest.approx(120)

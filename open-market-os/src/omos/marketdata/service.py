@@ -179,6 +179,9 @@ class MarketDataService:
         self._locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._instrument_cache: dict[str, Instrument] = {}
+        # Last still-forming bar per (instrument, base timeframe). Only closed bars go into the cache,
+        # so without this a request served from cache would silently drop the current bar.
+        self._forming: dict[tuple[str, str], tuple[list[float], int, str, DataStatus]] = {}
 
     # -- providers ------------------------------------------------------------------
 
@@ -336,7 +339,7 @@ class MarketDataService:
             stale_reason = None
             if prov.name == "CSV":
                 refresh = False
-            need = refresh and self._needs_refresh(cached, base_tf, end_ms, max_age_s)
+            need = refresh and self._needs_refresh(cached, base_tf, end_ms, max_age_s, (inst.id, base_tf))
             if need:
                 try:
                     fetch_start = start_ms
@@ -345,6 +348,12 @@ class MarketDataService:
                     fresh = self._track(prov.name, prov.fetch_candles, inst, base_tf, start_ms=fetch_start,
                                         end_ms=end_ms, limit=base_limit)
                     self.store.upsert(fresh)
+                    if end_ms is None and len(fresh):
+                        if fresh.last_closed:
+                            self._forming.pop((inst.id, base_tf), None)
+                        else:
+                            self._forming[(inst.id, base_tf)] = (fresh.rows()[-1], int(fresh.fetched_at or now_ms()),
+                                                                 fresh.source, fresh.status)
                 except OmosError as exc:
                     stale_reason = exc.message
                     if not len(cached):
@@ -352,6 +361,8 @@ class MarketDataService:
                             f"{prov.name} could not supply {inst.id} {timeframe}: {exc.message}. No cached data either."
                         ) from exc
             merged = self._merge(cached, fresh, inst.id, base_tf)
+            if fresh is None and end_ms is None and refresh:
+                merged = self._with_forming(merged, (inst.id, base_tf))
 
         out = clean(merged, session_id=inst.session, now_ms=now_ms())
         if base_tf != timeframe:
@@ -368,7 +379,8 @@ class MarketDataService:
             out.quality = {**out.quality, "from_cache": True}
         return out
 
-    def _needs_refresh(self, cached: Candles, base_tf: str, end_ms: int | None, max_age_s: float | None) -> bool:
+    def _needs_refresh(self, cached: Candles, base_tf: str, end_ms: int | None, max_age_s: float | None,
+                       key: tuple[str, str] | None = None) -> bool:
         """Only closed bars are cached, so a request for the latest data always fetches
         (incrementally) unless the caller accepts cached data up to ``max_age_s`` old, or asked
         for a historical window the cache already covers."""
@@ -378,8 +390,22 @@ class MarketDataService:
         if end_ms is not None and int(cached.ts[-1]) >= tf.floor(end_ms):
             return False
         if max_age_s is not None:
+            f = self._forming.get(key) if key else None
+            if f and int(f[0][0]) + tf.ms <= now_ms():
+                return True  # the bar that was forming has closed since: fetch it (and the new one)
             return (now_ms() - cached.fetched_at) / 1000 > max_age_s
         return True
+
+    def _with_forming(self, c: Candles, key: tuple[str, str]) -> Candles:
+        """Re-attach the remembered forming bar to cache-served data while that bar is still current."""
+        f = self._forming.get(key)
+        if not f:
+            return c
+        row, fetched_at, source, status = f
+        if int(row[0]) + parse(key[1]).ms <= now_ms() or (len(c) and int(c.ts[-1]) >= int(row[0])):
+            return c
+        return Candles.from_rows(c.rows() + [list(row)], instrument_id=key[0], timeframe=key[1], status=status,
+                                 source=source, fetched_at=fetched_at, last_closed=False)
 
     @staticmethod
     def _merge(cached: Candles, fresh: Candles | None, instrument_id: str, tf: str) -> Candles:

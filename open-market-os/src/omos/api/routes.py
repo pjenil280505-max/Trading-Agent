@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -274,17 +275,21 @@ def wl_delete(wl_id: int, request: Request, info=Depends(PAPER)):
 @router.get("/watchlists/{wl_id}/quotes")
 def wl_quotes(wl_id: int, request: Request, tf: str = "1d", info=Depends(READ)):
     h = H(request)
-    out = []
-    for iid in h.watchlists.get(wl_id)["items"]:
+
+    def one(iid: str) -> dict[str, Any]:
         try:
             c = h.market.get_candles(iid, tf, limit=30, max_age_s=30)
             last, prev = float(c.close[-1]), float(c.close[-2]) if len(c) > 1 else float(c.close[-1])
-            out.append({"instrument_id": iid, "price": last, "change_pct": (last / prev - 1) * 100 if prev else None,
-                        "spark": [float(x) for x in c.close[-30:]], "status": c.status.value,
-                        "stale": bool(c.quality.get("stale"))})
+            return {"instrument_id": iid, "price": last, "change_pct": (last / prev - 1) * 100 if prev else None,
+                    "spark": [float(x) for x in c.close[-30:]], "status": c.status.value,
+                    "stale": bool(c.quality.get("stale"))}
         except Exception as exc:  # noqa: BLE001 - one bad symbol must not break the list
-            out.append({"instrument_id": iid, "error": getattr(exc, "message", str(exc))[:200]})
-    return out
+            return {"instrument_id": iid, "error": getattr(exc, "message", str(exc))[:200]}
+
+    items = h.watchlists.get(wl_id)["items"]
+    # cold fetches go to the venue; run a few at once (provider rate limiters are thread-safe), keep list order
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        return list(pool.map(one, items))
 
 
 @router.get("/workspaces")

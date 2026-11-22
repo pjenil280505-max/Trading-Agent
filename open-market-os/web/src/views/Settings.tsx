@@ -120,13 +120,13 @@ function Devices() {
   const [preset, setPreset] = useState('paper-control')
   const [label, setLabel] = useState('My phone')
   const [code, setCode] = useState<any>(null)
-  const [left, setLeft] = useState(0)
+  const [now, setNow] = useState(Date.now())
   useEffect(() => {
     if (!code) return
-    const end = Date.now() + code.expires_in_s * 1000
-    const t = setInterval(() => { const s = Math.max(0, Math.round((end - Date.now()) / 1000)); setLeft(s); if (!s) clearInterval(t) }, 500)
+    const t = setInterval(() => setNow(Date.now()), 500)
     return () => clearInterval(t)
   }, [code])
+  const left = code ? Math.max(0, Math.round((code.expiresAt - now) / 1000)) : 0
   return (
     <>
       <Card title="Pair a phone, tablet or another computer">
@@ -137,7 +137,7 @@ function Devices() {
           <Field label="Permissions"><select value={preset} onChange={(e) => setPreset((e.target as HTMLSelectElement).value)}>
             {Object.entries(meta.data?.pairing_presets || {}).map(([k, v]) => <option value={k}>{k}: {(v as string[]).join(', ')}</option>)}</select></Field>
           <Field label="Device label"><input value={label} onInput={(e) => setLabel((e.target as HTMLInputElement).value)} /></Field>
-          <Btn kind="primary" onClick={async () => { try { setCode(await post('/auth/pairing', { preset, label })); tokens.reload() } catch (e) { toast(errText(e), 'error') } }}>Create one-time code</Btn>
+          <Btn kind="primary" onClick={async () => { try { const r = await post('/auth/pairing', { preset, label }); setNow(Date.now()); setCode({ ...r, expiresAt: Date.now() + r.expires_in_s * 1000 }); tokens.reload() } catch (e) { toast(errText(e), 'error') } }}>Create one-time code</Btn>
         </div>
         {code && <div class="alertbox ok" style="margin-top:8px">
           <div style="font-size:28px;letter-spacing:4px" class="mono">{left > 0 ? code.code : '— expired —'}</div>

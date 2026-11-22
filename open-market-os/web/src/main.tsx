@@ -118,6 +118,9 @@ function App() {
     void boot()
     const onAuth = () => { setToken(null); setAuthed(false) }
     window.addEventListener('omos:auth-required', onAuth)
+    // a sign-in link opened in a tab that is already showing the app only changes the #hash
+    const onHash = () => { if (/code=/.test(location.hash)) void boot() }
+    window.addEventListener('hashchange', onHash)
     live.statusListeners.add(setOnline)
     const off = live.on((e) => {
       if (e.topic === 'notification') {
@@ -129,7 +132,7 @@ function App() {
       if (e.topic === 'proposal') toast('An AI/automation order proposal is waiting for your approval (Portfolio → Proposals)', 'warn', 10000)
     })
     if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('/sw.js').catch(() => {})
-    return () => { window.removeEventListener('omos:auth-required', onAuth); live.statusListeners.delete(setOnline); off() }
+    return () => { window.removeEventListener('omos:auth-required', onAuth); window.removeEventListener('hashchange', onHash); live.statusListeners.delete(setOnline); off() }
   }, [])
 
   if (authed === null) return <div class="muted" style="padding:24px">Loading…</div>
@@ -164,7 +167,7 @@ function App() {
         <div class="topbar">
           <h1>{current.icon} {current.label}</h1>
           <span class={`badge ${online ? 'b-ok' : 'b-degraded'}`}>{online ? 'connected' : 'offline'}</span>
-          <Btn sm kind="ghost" title="Theme" onClick={() => prefs.set((x) => ({ ...x, theme: x.theme === 'dark' ? 'light' : 'dark' }))}>◐</Btn>
+          <Btn sm kind="ghost" title="Switch colour theme" onClick={() => prefs.set((x) => ({ ...x, theme: x.theme === 'dark' ? 'light' : 'dark' }))}>{pr.theme === 'dark' ? 'Light theme' : 'Dark theme'}</Btn>
         </div>
         <div class="content"><View /></div>
         <nav class="bottomnav">

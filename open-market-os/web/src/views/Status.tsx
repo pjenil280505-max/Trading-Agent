@@ -29,7 +29,7 @@ export function Status() {
       </Card>
       <Card title="Data providers">
         <table class="t"><thead><tr><th>Provider</th><th>Status</th><th class="right">Latency</th><th class="right">Requests</th><th class="right">Failures</th><th class="right">Rate-limited</th><th>Last OK</th><th>Last error</th></tr></thead>
-          <tbody>{d.providers.map((p: any) => <tr><td>{p.provider}</td><td><Badge kind={p.status === 'unknown' ? 'HISTORICAL' : p.status}>{p.status}</Badge></td>
+          <tbody>{d.providers.map((p: any) => <tr><td>{p.provider}</td><td><Badge kind={p.status === 'unknown' ? 'HISTORICAL' : p.status}>{p.status === 'unknown' ? 'not used yet' : p.status}</Badge></td>
             <td class="right">{p.latency_ms ? `${fmtNum(p.latency_ms, 0)} ms` : '—'}</td><td class="right">{p.requests}</td><td class="right">{p.failures}</td><td class="right">{p.rate_limited}</td>
             <td class="small">{fmtTime(p.last_ok)}</td><td class="small neg">{p.last_error || ''}</td></tr>)}</tbody></table>
       </Card>

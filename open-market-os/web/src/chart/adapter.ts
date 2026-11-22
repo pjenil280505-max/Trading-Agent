@@ -12,6 +12,27 @@ export type DataMeta = { status: string; source: string; stale?: boolean; qualit
 
 const BARS: Record<string, number> = { low: 1500, medium: 5000, high: 20000 }
 let barLimit = 1500
+const FIRST_CHUNK = 1000
+
+// Price/volume decimals per instrument, learned from tick size or the data itself (KLineChart's
+// setSymbol reloads data, so we remember the answer to avoid reloading twice next time).
+const PREC_KEY = 'omos.precision'
+const precision: Record<string, [number, number]> = (() => { try { return JSON.parse(localStorage.getItem(PREC_KEY) || '{}') } catch { return {} } })()
+// Decimals at 7 significant digits: real tick sizes survive, float noise from sources such as
+// Yahoo (189.97999572753906) does not. Handles exponent notation for very small prices/ticks.
+function decimals(v: number): number {
+  if (!Number.isFinite(v) || v === 0) return 0
+  const m = /^-?\d+(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(Number(v.toPrecision(7)).toString())
+  if (!m) return 0
+  return Math.max(0, (m[1]?.length ?? 0) - (m[2] ? Number(m[2]) : 0))
+}
+function precisionOf(bars: number[][], tick?: number | null): [number, number] {
+  let p = tick && tick > 0 ? decimals(tick) : 0
+  let v = 0
+  if (!(tick && tick > 0)) for (const b of bars.slice(-300)) p = Math.max(p, decimals(b[1]), decimals(b[2]), decimals(b[3]), decimals(b[4]))
+  for (const b of bars.slice(-300)) v = Math.max(v, decimals(b[5] ?? 0))
+  return [Math.min(p, 8), Math.min(v, 4)]
+}
 export function setDeviceTier(tier: string) { barLimit = BARS[tier] || 1500 }
 
 export function tfToPeriod(tf: string): Period {
@@ -76,7 +97,7 @@ function registerBackendIndicator(spec: IndSpec) {
   })
 }
 
-export type Listener = { onMeta?: (m: DataMeta) => void; onError?: (e: string) => void; onCrosshair?: (ts: number | null) => void;
+export type Listener = { onMeta?: (m: DataMeta) => void; onError?: (e: string) => void; onLoading?: (msg: string | null) => void; onCrosshair?: (ts: number | null) => void;
   onRange?: (from: number, to: number) => void; onDrawingsChanged?: () => void }
 
 export class ChartAdapter {
@@ -91,6 +112,7 @@ export class ChartAdapter {
   private offEvt: (() => boolean) | null = null
   private ls: Listener
   private loadedOlder = false
+  private total = 0
   suppressSync = false
 
   constructor(el: HTMLElement, ls: Listener = {}) {
@@ -117,27 +139,52 @@ export class ChartAdapter {
 
   // ---------------------------------------------------------------- data
   load(instrument: string, tf: string) {
+    const prev = this.instrument
     this.instrument = instrument.trim()
+    if (prev && prev !== this.instrument) this.hideAllDrawings()
     this.tf = tf
     this.loadedOlder = false
+    this.total = 0
     this.unsubLive?.()
     this.offEvt?.()
-    this.chart.setSymbol({ ticker: this.instrument, pricePrecision: 6, volumePrecision: 4 })
+    const [pp, vp] = precision[this.instrument] || [2, 2]
+    this.chart.setSymbol({ ticker: this.instrument, pricePrecision: pp, volumePrecision: vp })
     this.chart.setPeriod(tfToPeriod(tf))
     const self = this
     this.chart.setDataLoader({
       getBars: async ({ type, timestamp, callback }) => {
         try {
           if (type === 'init') {
-            const d = await get('/candles', { instrument: self.instrument, tf: self.tf, limit: barLimit, ha: self.kind === 'heikin_ashi' })
-            self.ls.onMeta?.({ status: d.status, source: d.source, stale: d.quality?.stale, quality: d.quality, instrument: d.instrument, count: d.count })
-            callback(toK(d.bars), { forward: d.bars.length >= barLimit * 0.9, backward: false })
+            // A small first chunk paints fast even when the host must fetch history from the venue;
+            // older bars load as the user scrolls left, up to this device's bar budget.
+            const first = Math.min(barLimit, FIRST_CHUNK)
+            const slow = window.setTimeout(() => self.ls.onLoading?.(`Loading ${self.instrument} ${self.tf}… the first load of a symbol fetches history from the data provider and can take several seconds; later loads come from the local cache.`), 700)
+            self.ls.onLoading?.(`Loading ${self.instrument} ${self.tf}…`)
+            try {
+              const d = await get('/candles', { instrument: self.instrument, tf: self.tf, limit: first, ha: self.kind === 'heikin_ashi' })
+              self.ls.onMeta?.({ status: d.status, source: d.source, stale: d.quality?.stale, quality: d.quality, instrument: d.instrument, count: d.count })
+              self.total = d.bars.length
+              callback(toK(d.bars), { forward: d.bars.length >= first * 0.9 && self.total < barLimit, backward: false })
+              const [pp, vp] = precisionOf(d.bars, d.instrument?.tick_size)
+              const cur = self.chart.getSymbol()
+              if (d.bars.length && cur && (cur.pricePrecision !== pp || cur.volumePrecision !== vp)) {
+                precision[self.instrument] = [pp, vp]
+                try { localStorage.setItem(PREC_KEY, JSON.stringify(precision)) } catch { /* storage full or blocked */ }
+                window.setTimeout(() => self.chart.setSymbol({ ticker: self.instrument, pricePrecision: pp, volumePrecision: vp }), 0)
+              }
+            } finally {
+              window.clearTimeout(slow)
+              self.ls.onLoading?.(null)
+            }
             await self.loadDrawings()
           } else if (type === 'forward' && timestamp) {
-            const d = await get('/candles', { instrument: self.instrument, tf: self.tf, limit: 2000, end: timestamp - 1, ha: self.kind === 'heikin_ashi' })
+            const want = Math.min(2000, barLimit - self.total)
+            if (want <= 0) { callback([], false); return }
+            const d = await get('/candles', { instrument: self.instrument, tf: self.tf, limit: want, end: timestamp - 1, ha: self.kind === 'heikin_ashi' })
             const bars = toK(d.bars).filter((b) => b.timestamp < timestamp)
             self.loadedOlder = true
-            callback(bars, { forward: bars.length > 50, backward: false })
+            self.total += bars.length
+            callback(bars, { forward: bars.length > 50 && self.total < barLimit, backward: false })
           } else callback([], false)
         } catch (e: any) {
           self.ls.onError?.(e?.message || String(e))
@@ -185,17 +232,21 @@ export class ChartAdapter {
 
   // ---------------------------------------------------------------- indicators
   async addIndicator(id: string, params: Record<string, any> = {}, uid?: string) {
-    const specs = await indicatorCatalog()
-    const spec = specs.find((s) => s.id === id)
-    if (!spec) throw new Error(`unknown indicator ${id}`)
-    registerBackendIndicator(spec)
     const ai: ActiveIndicator = { uid: uid || `${id}_${Math.random().toString(36).slice(2, 8)}`, id, params }
-    this.chart.createIndicator({
-      name: `omos_${id}`, id: ai.uid, paneId: spec.overlay ? 'candle_pane' : undefined,
-      extendData: { instrument: this.instrument, tf: this.tf, params },
-    } as any, spec.overlay)
+    await this.createOnChart(ai)
     this.indicators.push(ai)
     return ai
+  }
+
+  private async createOnChart(ai: ActiveIndicator) {
+    const specs = await indicatorCatalog()
+    const spec = specs.find((s) => s.id === ai.id)
+    if (!spec) throw new Error(`unknown indicator ${ai.id}`)
+    registerBackendIndicator(spec)
+    this.chart.createIndicator({
+      name: `omos_${ai.id}`, id: ai.uid, paneId: spec.overlay ? 'candle_pane' : undefined,
+      extendData: { instrument: this.instrument, tf: this.tf, params: ai.params },
+    } as any, spec.overlay)
   }
 
   removeIndicator(uid: string) {
@@ -203,17 +254,26 @@ export class ChartAdapter {
     this.indicators = this.indicators.filter((i) => i.uid !== uid)
   }
 
+  // Re-create indicators for new instrument/timeframe WITHOUT emptying `indicators`: callers save the
+  // workspace right after load(), and an emptied list would silently drop the user's indicators.
   private reapplyIndicators() {
-    const list = this.indicators
-    this.indicators = []
-    for (const i of list) {
+    for (const i of this.indicators) {
       this.chart.removeIndicator({ id: i.uid })
-      void this.addIndicator(i.id, i.params, i.uid)
+      void this.createOnChart(i).catch((e) => this.ls.onError?.(e?.message || String(e)))
     }
   }
 
   // ---------------------------------------------------------------- drawings (persisted per instrument)
+  // `persisted` = ids of drawings stored on the host and shown for the current instrument.
+  // KLineChart fires onRemoved for EVERY removal, and onRemoved deletes the drawing on the host.
+  // So a removal that only changes the view (other symbol, unmount) must first drop the id from
+  // `persisted`; data reloads (timeframe, precision) never remove drawings at all.
   private persisted = new Set<string>()
+
+  private hideAllDrawings() {
+    this.persisted.clear()
+    this.chart.removeOverlay()
+  }
 
   startDrawing(name: string, extend: Record<string, any> = {}) {
     this.chart.createOverlay({
@@ -243,11 +303,13 @@ export class ChartAdapter {
   }
 
   async loadDrawings() {
-    const list = await get<any[]>('/drawings', { instrument: this.instrument })
-    this.chart.removeOverlay()
-    this.persisted.clear()
+    const inst = this.instrument
+    const list = await get<any[]>('/drawings', { instrument: inst })
+    if (inst !== this.instrument) return  // the user switched symbol while this was loading
     for (const d of list) {
+      const shown = this.chart.getOverlays({ id: d.id }).length > 0
       this.persisted.add(d.id)
+      if (shown) continue  // idempotent: reloads only add drawings that are missing
       this.chart.createOverlay({
         id: d.id, name: d.kind, lock: d.locked, visible: d.visible, extendData: d.extend, styles: d.styles,
         points: d.points.map((p: any) => ({ timestamp: p.t, value: p.v })),
@@ -300,6 +362,7 @@ export class ChartAdapter {
   destroy() {
     this.unsubLive?.()
     this.offEvt?.()
+    this.persisted.clear()  // unmounting must never delete drawings on the host
     dispose(this.chart)
   }
 

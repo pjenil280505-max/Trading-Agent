@@ -23,7 +23,9 @@ export function Charts() {
   const saveTimer = useRef<number>()
 
   useEffect(() => {
-    get('/workspaces/default').then((w) => setLayout(normalise(w.layout))).catch(() => setLayout(normalise({})))
+    // list first: a missing workspace is normal on first run and should not produce a 404
+    get<any[]>('/workspaces').then((ws) => ws.some((w) => w.name === 'default') ? get('/workspaces/default') : { layout: {} })
+      .then((w) => setLayout(normalise(w.layout))).catch(() => setLayout(normalise({})))
   }, [])
 
   const update = (fn: (l: Layout) => Layout) => {
@@ -80,6 +82,7 @@ function ChartCell(p: { index: number; cfg: CellCfg; focused: boolean; sync: Lay
   const ad = useRef<ChartAdapter | null>(null)
   const [meta, setMeta] = useState<DataMeta | null>(null)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState<string | null>(null)
   const [sym, setSym] = useState(p.cfg.instrument)
   const [active, setActive] = useState<ActiveIndicator[]>([])
   const [specs, setSpecs] = useState<IndSpec[]>([])
@@ -98,6 +101,7 @@ function ChartCell(p: { index: number; cfg: CellCfg; focused: boolean; sync: Lay
     const a = new ChartAdapter(host.current!, {
       onMeta: (m) => { setMeta(m); setError('') },
       onError: (e) => setError(e),
+      onLoading: setLoading,
       onCrosshair: (ts) => syncRef.current.crosshair && broadcast({ from: p.index, kind: 'crosshair', value: ts }),
       onRange: (from) => syncRef.current.range && broadcast({ from: p.index, kind: 'range', value: from }),
       onDrawingsChanged: () => setTick((x) => x + 1),
@@ -196,6 +200,7 @@ function ChartCell(p: { index: number; cfg: CellCfg; focused: boolean; sync: Lay
         <div class="kl" ref={host} />
         {simulated && <div class="chartmsg" style="align-items:flex-start;color:var(--sim)">SIMULATED DATA — NOT REAL PRICES</div>}
         {meta?.stale && <div class="chartmsg" style="align-items:flex-end;color:var(--bad)">Provider unavailable — cached bars only, not live</div>}
+        {loading && !error && <div class="chartmsg"><span>{loading}</span></div>}
         {error && <div class="chartmsg"><div class="alertbox error">{error}</div></div>}
       </div>
       {results.length > 0 && (

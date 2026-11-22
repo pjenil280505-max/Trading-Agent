@@ -30,6 +30,42 @@ def _port_in_use(host: str, port: int) -> bool:
         return s.connect_ex((host if host not in ("0.0.0.0", "") else "127.0.0.1", port)) == 0
 
 
+RUNTIME_FILE = "host.runtime.json"
+
+
+def _write_runtime(cfg: HostConfig) -> Path:
+    """Record the port of the running host, so `omos open/status/mcp` find it even when started with --port."""
+    path = cfg.data_path / RUNTIME_FILE
+    path.write_text(json.dumps({"pid": os.getpid(), "port": cfg.port, "started_at": int(time.time())}))
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return path
+
+
+def _clear_runtime(path: Path) -> None:
+    try:
+        if json.loads(path.read_text()).get("pid") == os.getpid():
+            path.unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def _apply_runtime(cfg: HostConfig) -> HostConfig:
+    """Use the running host's actual port when its runtime file points at a live process listening on it."""
+    import psutil
+
+    try:
+        info = json.loads((cfg.data_path / RUNTIME_FILE).read_text())
+        pid, port = int(info["pid"]), int(info["port"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return cfg
+    if 0 < port < 65536 and psutil.pid_exists(pid) and _port_in_use("127.0.0.1", port):
+        cfg.port = port
+    return cfg
+
+
 def _bootstrap_url(cfg: HostConfig) -> str:
     from omos.security.auth import AuthService
     from omos.storage.db import Database
@@ -80,15 +116,17 @@ def cmd_start(args) -> int:
     ssl = {}
     if cfg.tls_certfile and cfg.tls_keyfile:
         ssl = {"ssl_certfile": cfg.tls_certfile, "ssl_keyfile": cfg.tls_keyfile}
+    runtime = _write_runtime(cfg)
     try:
         uvicorn.run(app, host=cfg.effective_bind(), port=cfg.port, log_level="warning", access_log=False, **ssl)
     finally:
+        _clear_runtime(runtime)
         host.stop()
     return 0
 
 
 def cmd_open(args) -> int:
-    cfg = _cfg(args)
+    cfg = _apply_runtime(_cfg(args))
     if not _port_in_use("127.0.0.1", cfg.port):
         print("The host is not running. Start it with 'omos start'.", file=sys.stderr)
         return 2
@@ -102,7 +140,7 @@ def cmd_open(args) -> int:
 def cmd_mcp(args) -> int:
     from omos.mcp.server import serve_stdio
 
-    cfg = _cfg(args)
+    cfg = _apply_runtime(_cfg(args))
     serve_stdio(cfg.data_path, f"http://127.0.0.1:{cfg.port}")
     return 0
 
@@ -110,7 +148,7 @@ def cmd_mcp(args) -> int:
 def cmd_status(args) -> int:
     import httpx
 
-    cfg = _cfg(args)
+    cfg = _apply_runtime(_cfg(args))
     out = {"version": __version__, "data_dir": str(cfg.data_path), "port": cfg.port,
            "running": _port_in_use("127.0.0.1", cfg.port)}
     if out["running"]:
