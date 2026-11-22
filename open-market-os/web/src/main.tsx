@@ -95,6 +95,7 @@ function App() {
   const [menu, setMenu] = useState(false)
   const [online, setOnline] = useState(false)
   const [setup, setSetup] = useState(false)
+  const [version, setVersion] = useState('')
 
   useEffect(() => { document.documentElement.dataset.theme = pr.theme }, [pr.theme])
 
@@ -128,6 +129,7 @@ function App() {
   }
 
   useEffect(() => {
+    fetch('/api/health', { cache: 'no-store' }).then((r) => r.json()).then((h) => setVersion(h.version || '')).catch(() => {})
     void boot()
     const onAuth = () => { setToken(null); setAuthed(false) }
     window.addEventListener('omos:auth-required', onAuth)
@@ -158,7 +160,7 @@ function App() {
   return (
     <div class="shell">
       <aside class={`side ${menu ? 'open' : ''}`}>
-        <div class="brand">◆ Open Market OS <small>v0.1</small></div>
+        <div class="brand">◆ Open Market OS {version && <small>v{version}</small>}</div>
         <nav class="nav">
           {visible.map((r) => (
             <>
