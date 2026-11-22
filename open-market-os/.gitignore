@@ -16,3 +16,4 @@ releases/*.tar.gz
 releases/omos-linux-x86_64
 e2e-artifacts/
 scan-reports/
+benchmarks.json
