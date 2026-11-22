@@ -36,10 +36,21 @@ def frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+GUI_EXE = {"win32": "Open Market OS.exe", "darwin": "Open Market OS"}.get(sys.platform, "open-market-os")
+CLI_EXE = "omos.exe" if os.name == "nt" else "omos"
+
+
 def app_command(*args: str) -> list[str]:
     """Command running this installation's CLI, without a console window where the OS has one."""
+    if os.environ.get("APPIMAGE"):
+        # inside an AppImage the program files exist only while its launcher process runs, so a
+        # background host must start the AppImage file again rather than a file inside it
+        return [os.environ["APPIMAGE"], *args]
     if frozen():
-        return [sys.executable, *args]  # the app executable accepts CLI arguments
+        # the packaged app ships a windowed launcher and a console 'omos'; background processes
+        # (host, start at login) use the windowed one so no console window ever appears
+        gui = Path(sys.executable).with_name(GUI_EXE)
+        return [str(gui if gui.exists() else Path(sys.executable)), *args]
     exe = sys.executable
     if os.name == "nt":
         pyw = Path(exe).with_name("pythonw.exe")
@@ -126,8 +137,13 @@ def launch(*, open_browser: bool = True, timeout: float = 90.0) -> int:
 
 
 def entry() -> int:
-    """Entry point of the windowed app executable: no arguments = launcher, otherwise the CLI."""
-    if len(sys.argv) > 1:
+    """Entry point of both packaged executables. The windowed app with no arguments is the launcher
+    (what the desktop icon runs); with arguments, or as the console 'omos', it is the CLI."""
+    for name in ("stdout", "stderr"):  # windowed executables have no console streams
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115
+    is_cli = Path(sys.executable).stem.lower() == "omos" or not frozen()
+    if len(sys.argv) > 1 or (is_cli and frozen()):
         from omos.cli import main
         return main()
     try:

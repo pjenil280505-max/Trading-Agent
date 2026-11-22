@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Open Market OS
+GenericName=Market workstation
+Comment=Charts, research, strategy testing, paper trading and bots on your own computer
+Exec=open-market-os
+Icon=open-market-os
+Terminal=false
+Categories=Office;Finance;
+Keywords=trading;charts;stocks;crypto;backtest;
+StartupNotify=false

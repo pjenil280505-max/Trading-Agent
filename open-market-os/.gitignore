@@ -18,3 +18,5 @@ scan-reports/
 benchmarks.json
 .coverage
 htmlcov/
+packaging/build-version.txt
+node_modules/

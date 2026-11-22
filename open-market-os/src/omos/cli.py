@@ -143,6 +143,64 @@ def cmd_launch(args) -> int:
     return launch(open_browser=not args.no_browser)
 
 
+def cmd_stop(args) -> int:
+    """Ask the running host to shut down cleanly (the installers call this before upgrading or uninstalling)."""
+    import httpx
+    import psutil
+
+    from omos.security.auth import AuthService
+    from omos.storage.db import Database
+
+    cfg = _apply_runtime(_cfg(args))
+    if not _port_in_use("127.0.0.1", cfg.port):
+        if not args.quiet:
+            print("Open Market OS is not running.")
+        return 0
+    db = Database(cfg.db_path)
+    auth = AuthService(db)
+    tok, info = auth.create_token("stop command", "cli", ["admin"], ttl_days=0.01, actor="cli")
+    asked = False
+    try:
+        r = httpx.post(f"http://127.0.0.1:{cfg.port}/api/system/shutdown", headers={"Authorization": f"Bearer {tok}"},
+                       timeout=10, trust_env=False)
+        asked = r.status_code == 200
+    except httpx.HTTPError:
+        pass
+    finally:
+        try:
+            auth.revoke(info["id"], actor="cli")
+        except Exception:  # noqa: BLE001 - the token expires within minutes anyway
+            pass
+        db.close()
+    end = time.monotonic() + args.timeout
+    while _port_in_use("127.0.0.1", cfg.port) and time.monotonic() < end:
+        time.sleep(0.3)
+    if _port_in_use("127.0.0.1", cfg.port):
+        # last resort, and only for the process our own runtime file names
+        try:
+            pid = int(json.loads((cfg.data_path / RUNTIME_FILE).read_text())["pid"])
+            proc = psutil.Process(pid)
+            if "omos" in " ".join(proc.cmdline()).lower() or "open market os" in proc.name().lower() \
+                    or "open-market-os" in proc.name().lower():
+                proc.terminate()
+                proc.wait(15)
+        except (OSError, ValueError, KeyError, psutil.Error):
+            pass
+    stopped = not _port_in_use("127.0.0.1", cfg.port)
+    if not args.quiet:
+        print("Open Market OS stopped." if stopped else "Open Market OS did not stop; close it from its window or restart the computer.")
+    return 0 if stopped else (0 if args.quiet and asked else 1)
+
+
+def cmd_autostart(args) -> int:
+    from omos import desktop
+
+    out = desktop.get_autostart() if args.action == "status" else desktop.set_autostart(args.action == "on")
+    if not args.quiet:
+        print(json.dumps(out, indent=2))
+    return 0
+
+
 def cmd_open(args) -> int:
     cfg = _apply_runtime(_cfg(args))
     if not _port_in_use("127.0.0.1", cfg.port):
@@ -352,6 +410,14 @@ def main(argv: list[str] | None = None) -> int:
     la = sub.add_parser("launch", help="start in the background if needed and open the app (what the desktop icon does)")
     la.add_argument("--no-browser", action="store_true")
     la.set_defaults(fn=cmd_launch)
+    stp = sub.add_parser("stop", help="stop the running host cleanly")
+    stp.add_argument("--quiet", action="store_true")
+    stp.add_argument("--timeout", type=float, default=30)
+    stp.set_defaults(fn=cmd_stop)
+    au = sub.add_parser("autostart", help="start the host in the background when you sign in to this computer")
+    au.add_argument("action", choices=["on", "off", "status"])
+    au.add_argument("--quiet", action="store_true")
+    au.set_defaults(fn=cmd_autostart)
     o = sub.add_parser("open", help="open the UI with a fresh sign-in link")
     o.add_argument("--print-only", action="store_true")
     o.set_defaults(fn=cmd_open)
