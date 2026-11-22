@@ -40,6 +40,7 @@ from omos.events import EventBus
 from omos.jobs import JobRegistry
 from omos.execution.gateway import ExecutionGateway
 from omos.marketdata.service import MarketDataService
+from omos.marketdata.streaming import StreamManager, Tick
 from omos.marketdata.sessions import get_session
 from omos.mcp.client import MCPClientService
 from omos.plugins.manager import PluginManager
@@ -138,6 +139,9 @@ class Host:
         self.load_plugin_providers()
         self.subscriptions: dict[tuple[str, str], dict[str, Any]] = {}
         self._sub_lock = threading.Lock()
+        self.streams = StreamManager(self._on_tick)
+        self.streams.enabled = bool(self.db.get_setting("data.streaming", True))
+        self._last_paper_px: dict[str, float] = {}
         self.loops: dict[str, Loop] = {}
         self._bootstrap_defaults()
         if start_loops:
@@ -203,12 +207,42 @@ class Host:
     def subscribe(self, instrument_id: str, timeframe: str) -> None:
         with self._sub_lock:
             self.subscriptions.setdefault((instrument_id, timeframe), {"since": now_ms(), "last_ts": None})["touched"] = now_ms()
+        self.streams.want(instrument_id)
+
+    def _on_tick(self, t: Tick) -> None:
+        """A live trade/ticker: update the quote, the forming bar of every chart showing it, and paper fills."""
+        from omos.marketdata.timeframes import parse as parse_tf
+
+        self.market.on_tick(t.instrument_id, t.price, t.ts, t.bid, t.ask)
+        now = now_ms()
+        if now - self._last_paper_px.get(t.instrument_id, 0) >= 1000:  # resting paper orders: at most once a second
+            self._last_paper_px[t.instrument_id] = now
+            self.gateway.on_price(t.instrument_id, t.price, "LIVE")
+        with self._sub_lock:
+            subs = [(k, v) for k, v in self.subscriptions.items() if k[0] == t.instrument_id]
+        for (iid, tf), state in subs:
+            bar = state.get("bar")
+            if not bar:
+                continue  # wait for the first polled bar: it carries the venue's open, high and low
+            size = parse_tf(tf).ms
+            if t.ts >= bar[0] + size:
+                start = t.ts - (t.ts % size) if size < 86_400_000 * 7 else bar[0] + size
+                bar = [start, t.price, t.price, t.price, t.price, t.size]
+            else:
+                bar = [bar[0], bar[1], max(bar[2], t.price), min(bar[3], t.price), t.price, bar[5] + t.size]
+            state["bar"], state["live_at"] = bar, now
+            if now - state.get("sent_at", 0) >= 250:  # at most 4 chart updates a second per chart
+                state["sent_at"] = now
+                self.bus.publish("candle", {"instrument": iid, "timeframe": tf, "bar": bar, "closed": False,
+                                            "status": "LIVE", "source": f"{iid.split(':')[0]} live stream"})
 
     def _poll_market(self) -> None:
         cutoff = now_ms() - 120_000  # clients re-subscribe every minute; drop stale subscriptions
         with self._sub_lock:
             for k in [k for k, v in self.subscriptions.items() if v.get("touched", 0) < cutoff]:
                 self.subscriptions.pop(k, None)
+                if not any(k2[0] == k[0] for k2 in self.subscriptions):
+                    self.streams.unwant(k[0])
             subs = list(self.subscriptions.items())
         for (iid, tf), state in subs:
             try:
@@ -219,9 +253,16 @@ class Host:
             if not len(c):
                 continue
             last = c.rows()[-1]
-            self.gateway.on_price(iid, float(last[4]), c.status.value)
+            streamed = now_ms() - state.get("live_at", 0) < 15_000 and not c.quality.get("stale")
+            if streamed and not c.last_closed and state.get("bar") and state["bar"][0] == last[0]:
+                last = [last[0], last[1], max(last[2], state["bar"][4]), min(last[3], state["bar"][4]), state["bar"][4],
+                        last[5]]  # the venue's bar, with the newer streamed price as its close
+            status = "LIVE" if streamed else ("STALE" if c.quality.get("stale") else c.status.value)
+            if not streamed:
+                self.gateway.on_price(iid, float(last[4]), c.status.value)
+            state["bar"] = None if c.last_closed else list(last)
             self.bus.publish("candle", {"instrument": iid, "timeframe": tf, "bar": last, "closed": c.last_closed,
-                                        "status": c.status.value, "source": c.source})
+                                        "status": status, "source": c.source, "stale": bool(c.quality.get("stale"))})
             state["last_ts"] = last[0]
 
     def _maintenance(self) -> None:
@@ -310,6 +351,8 @@ class Host:
             lp.start()
         self.loops["watchdog"] = Loop("watchdog", self._watchdog, 15.0, self.db)
         self.loops["watchdog"].start()
+        if self.streams.enabled:
+            self.streams.start()
         self._start_local_ai()
         log.info("Open Market OS host %s started (data: %s)", __version__, self.cfg.data_path)
 
@@ -323,6 +366,7 @@ class Host:
             if lp.thread:
                 lp.thread.join(timeout=10)
         self.market.persist_health()
+        self.streams.stop()
         self.keep_awake.set(False)
         self.local_ai.stop_managed()
         self.db.heartbeat("host", {"stopped": True})
@@ -336,6 +380,7 @@ class Host:
             "lan_port": self.cfg.effective_lan_port if self.cfg.allow_remote else None,
             "remote_access": self.cfg.allow_remote, "loops": [lp.status() for lp in self.loops.values()],
             "heartbeats": hb, "providers": self.market.health_report(), "subscriptions": len(self.subscriptions),
+            "streams": {"enabled": self.streams.enabled, "venues": self.streams.status()},
             "secrets": self.secrets.status(), "device": self.device, "live_trading_enabled": bool(self.db.get_setting("trading.live_enabled", False)),
             "emergency_stop": self.risk.global_halt(), "schema_version": self.db.schema_version(),
             "backups": list_backups(self.cfg.backups_path)[:5],

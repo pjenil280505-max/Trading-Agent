@@ -12,11 +12,13 @@ import numpy as np
 class DataStatus(str, Enum):
     """How fresh/real a piece of data is. Shown to the user on every chart."""
 
-    REALTIME = "REALTIME"      # streamed or polled from the venue with no stated delay
+    LIVE = "LIVE"              # streamed from the venue's live feed right now
+    REALTIME = "REALTIME"      # polled from the venue with no stated delay (shown as LIVE with its poll interval)
     DELAYED = "DELAYED"        # the source states or is known to impose a delay
     HISTORICAL = "HISTORICAL"  # end-of-day or archival data, not live
     SIMULATED = "SIMULATED"    # generated; never real prices (test/demo mode only)
     ESTIMATED = "ESTIMATED"    # derived/aggregated by us from other data
+    STALE = "STALE"            # was live, but no update arrived for too long: not safe to trade on
     UNAVAILABLE = "UNAVAILABLE"
 
 

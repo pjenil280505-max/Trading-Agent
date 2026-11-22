@@ -21,7 +21,7 @@ export function Dashboard() {
         <div class="alertbox">
           <b>Welcome.</b> Everything here starts in <b>paper</b> mode with simulated money. Try: open <a href="/charts" onClick={(e) => { e.preventDefault(); go('/charts') }}>Charts</a>,
           then the <a href="/strategy" onClick={(e) => { e.preventDefault(); go('/strategy') }}>Strategy lab</a> to backtest an idea before any bot runs it.
-          Every price shows a label: <StatusBadge status="REALTIME" /> <StatusBadge status="DELAYED" /> <StatusBadge status="HISTORICAL" />.
+          Every price shows a label: <StatusBadge status="LIVE" /> <StatusBadge status="REALTIME" /> <StatusBadge status="DELAYED" /> <StatusBadge status="HISTORICAL" /> <StatusBadge status="STALE" />.
         </div>
       )}
       <div class="grid g2">

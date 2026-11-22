@@ -143,3 +143,5 @@ details summary { cursor: pointer; }
 .jobprogress .bar { height: 8px; background: var(--panel2); border-radius: 999px; overflow: hidden; }
 .jobprogress .bar span { display: block; height: 100%; background: var(--accent); transition: width .4s; }
 label.row input[type=checkbox] { width: 18px; height: 18px; flex: none; }
+
+.badge .poll { opacity: .65; font-weight: 400; margin-left: 2px; }

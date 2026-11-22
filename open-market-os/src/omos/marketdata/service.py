@@ -182,6 +182,7 @@ class MarketDataService:
         # Last still-forming bar per (instrument, base timeframe). Only closed bars go into the cache,
         # so without this a request served from cache would silently drop the current bar.
         self._forming: dict[tuple[str, str], tuple[list[float], int, str, DataStatus]] = {}
+        self._live: dict[str, tuple[float, int, float | None, float | None, int]] = {}
 
     # -- providers ------------------------------------------------------------------
 
@@ -426,7 +427,24 @@ class MarketDataService:
             raise NotFound(f"no imported data for {instrument_id} at {timeframe}")
         return c
 
+    LIVE_MAX_AGE_MS = 15_000
+
+    def on_tick(self, instrument_id: str, price: float, ts: int, bid: float | None = None,
+                ask: float | None = None) -> None:
+        """A price from a live stream (see streaming.py): becomes the quote while it is fresh."""
+        self._live[instrument_id] = (price, ts, bid, ask, now_ms())
+
+    def live_quote(self, instrument_id: str) -> Quote | None:
+        q = self._live.get(instrument_id)
+        if not q or now_ms() - q[4] > self.LIVE_MAX_AGE_MS:
+            return None
+        return Quote(instrument_id, q[0], q[1], DataStatus.LIVE, f"{instrument_id.split(':')[0]} live stream",
+                     bid=q[2], ask=q[3])
+
     def get_quote(self, instrument_id: str) -> Quote:
+        live = self.live_quote(instrument_id)
+        if live:
+            return live
         inst = self.instrument(instrument_id)
         prov = self.provider(inst.provider)
         try:

@@ -109,6 +109,7 @@ export class ChartAdapter {
   indicators: ActiveIndicator[] = []
   magnet: 'normal' | 'weak_magnet' | 'strong_magnet' = 'normal'
   private unsubLive: (() => void) | null = null
+  private meta: DataMeta | null = null
   private offEvt: (() => boolean) | null = null
   private ls: Listener
   private loadedOlder = false
@@ -162,7 +163,8 @@ export class ChartAdapter {
             self.ls.onLoading?.(`Loading ${self.instrument} ${self.tf}…`)
             try {
               const d = await get('/candles', { instrument: self.instrument, tf: self.tf, limit: first, ha: self.kind === 'heikin_ashi' })
-              self.ls.onMeta?.({ status: d.status, source: d.source, stale: d.quality?.stale, quality: d.quality, instrument: d.instrument, count: d.count })
+              self.meta = { status: d.status, source: d.source, stale: d.quality?.stale, quality: d.quality, instrument: d.instrument, count: d.count }
+              self.ls.onMeta?.(self.meta)
               self.total = d.bars.length
               callback(toK(d.bars), { forward: d.bars.length >= first * 0.9 && self.total < barLimit, backward: false })
               const [pp, vp] = precisionOf(d.bars, d.instrument?.tick_size)
@@ -199,6 +201,11 @@ export class ChartAdapter {
           if (d.instrument !== self.instrument || d.timeframe !== self.tf || self.kind === 'heikin_ashi') return
           const [t, o, h, l, c, v] = d.bar
           callback({ timestamp: t, open: o, high: h, low: l, close: c, volume: v })
+          // the label follows the data: LIVE while streamed, polled otherwise, STALE when updates stop
+          if (self.meta && (self.meta.status !== d.status || !!self.meta.stale !== !!d.stale)) {
+            self.meta = { ...self.meta, status: d.status, stale: !!d.stale, source: d.source || self.meta.source }
+            self.ls.onMeta?.(self.meta)
+          }
         })
       },
       unsubscribeBar: () => { self.unsubLive?.(); self.offEvt?.(); self.unsubLive = null },

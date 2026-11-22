@@ -15,19 +15,24 @@ export function Badge(p: { kind: string; children?: ComponentChildren; title?: s
   return <span class={`badge b-${p.kind}`} title={p.title}>{p.children ?? p.kind}</span>
 }
 
-/** Data-status label shown next to every price/chart: REALTIME / DELAYED / HISTORICAL / SIMULATED / STALE */
-export function StatusBadge(p: { status?: string; stale?: boolean; source?: string }) {
+/** Data-status label shown next to every price and chart: LIVE / DELAYED / HISTORICAL / SIMULATED / STALE / UNAVAILABLE.
+ *  Streamed prices are LIVE; prices polled from the venue are also LIVE but say how often they are polled. */
+export function StatusBadge(p: { status?: string; stale?: boolean; source?: string; pollSeconds?: number }) {
   if (!p.status) return null
-  const kind = p.stale ? 'STALE' : p.status
+  const st = p.stale ? 'STALE' : p.status
+  const label = st === 'REALTIME' ? 'LIVE' : st
   const tips: Record<string, string> = {
-    REALTIME: 'Polled from the venue; delay = poll interval + network',
-    DELAYED: 'Source delays data (often 15–20 min) or is unofficial',
-    HISTORICAL: 'End-of-day / archival data — not live',
-    SIMULATED: 'NOT real prices — generated for demo/testing',
-    STALE: 'Provider unavailable: showing cached bars only',
+    LIVE: 'Streamed from the venue as trades happen',
+    REALTIME: `Polled from the venue${p.pollSeconds ? ` every ${p.pollSeconds} s` : ''}: up to one polling interval old`,
+    DELAYED: 'The source delays its data (often 15–20 min) or is unofficial',
+    HISTORICAL: 'End-of-day or archival data: not live',
+    SIMULATED: 'NOT real prices: generated for demos and simulations',
+    STALE: 'No fresh update: showing the last known data only. Bots do not trade on it',
+    UNAVAILABLE: 'No data from this source right now',
     ESTIMATED: 'Derived values',
   }
-  return <Badge kind={kind} title={`${tips[kind] || ''}${p.source ? ` — ${p.source}` : ''}`}>{kind}</Badge>
+  const kind = st === 'LIVE' ? 'REALTIME' : st  // green; .b-LIVE is the red live-TRADING mode badge
+  return <Badge kind={kind} title={`${tips[st] || ''}${p.source ? ` — ${p.source}` : ''}`}>{label}{st === 'REALTIME' ? <span class="poll">·poll</span> : null}</Badge>
 }
 
 export function Btn(p: { onClick?: () => any; children: ComponentChildren; kind?: string; sm?: boolean; disabled?: boolean;
