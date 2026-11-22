@@ -318,6 +318,7 @@ class AgentService:
         system = SYSTEM.format(title=ROLES[role].split(" — ")[0], role=f"{role}. {ROLES[role]}")
         failures: list[str] = []
         requested = provider_id
+        self.providers.client(requested)  # the chosen provider must be enabled and within budget: refused otherwise
         for pid in self._candidates(provider_id):
             try:
                 client = self.providers.client(pid)
