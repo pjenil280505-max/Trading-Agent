@@ -331,3 +331,13 @@ def test_unknown_api_route_and_errors_hide_internals(env):
     assert r.status_code == 404
     r = c.post("/api/orders", json={"account_id": "x"})
     assert r.status_code == 422 and "Traceback" not in r.text
+
+
+def test_shutdown_hooks_run_on_lifespan_exit(env):
+    """uvicorn re-raises SIGTERM after graceful shutdown, so host cleanup must run in the lifespan."""
+    app = create_app(env["host"], testing=True)
+    ran = []
+    app.state.shutdown_hooks = [lambda: ran.append("a"), lambda: 1 / 0, lambda: ran.append("b")]
+    with TestClient(app):
+        assert ran == []
+    assert ran == ["a", "b"]  # a failing hook does not skip the others

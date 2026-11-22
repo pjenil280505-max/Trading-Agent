@@ -117,6 +117,7 @@ def cmd_start(args) -> int:
     if cfg.tls_certfile and cfg.tls_keyfile:
         ssl = {"ssl_certfile": cfg.tls_certfile, "ssl_keyfile": cfg.tls_keyfile}
     runtime = _write_runtime(cfg)
+    app.state.shutdown_hooks = [lambda: _clear_runtime(runtime), host.stop]
     try:
         uvicorn.run(app, host=cfg.effective_bind(), port=cfg.port, log_level="warning", access_log=False, **ssl)
     finally:
@@ -224,7 +225,8 @@ def cmd_config(args) -> int:
 
 
 def cmd_service(args) -> int:
-    exe = shutil.which("omos") or f"{sys.executable} -m omos"
+    # frozen single-file app: the binary itself is the command; otherwise the installed script
+    exe = sys.executable if getattr(sys, "frozen", False) else (shutil.which("omos") or f"{sys.executable} -m omos")
     cfg = _cfg(args)
     if sys.platform.startswith("linux"):
         unit = f"""[Unit]

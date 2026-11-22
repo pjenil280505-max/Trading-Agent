@@ -104,3 +104,12 @@ def test_bruteforce_lockout(db):
 def test_invalid_scopes(db):
     with pytest.raises(ValidationError):
         AuthService(db).create_token("x", "device", ["root"])
+
+
+def test_bad_vault_passphrase_env_keeps_host_running_with_locked_vault(tmp_path, monkeypatch, caplog):
+    """Regression: a too-short OMOS_VAULT_PASSPHRASE crashed host startup with a traceback."""
+    monkeypatch.setenv("OMOS_VAULT_PASSPHRASE", "x")
+    v = VaultBackend(tmp_path / "secrets.vault")
+    assert not v.unlocked
+    assert "did not unlock the vault" in caplog.text
+    assert not (tmp_path / "secrets.vault").exists()   # nothing written, never plaintext

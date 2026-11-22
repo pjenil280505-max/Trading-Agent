@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import re
+from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -95,10 +96,23 @@ class Guard(BaseHTTPMiddleware):
         return response
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    yield
+    # uvicorn re-raises SIGTERM/SIGINT after its graceful shutdown, so code placed after uvicorn.run()
+    # never runs on a signal. Cleanup registered here runs during that graceful shutdown.
+    for hook in getattr(app.state, "shutdown_hooks", []):
+        try:
+            await asyncio.to_thread(hook)
+        except Exception:  # noqa: BLE001 - one failing hook must not skip the others
+            log.exception("shutdown hook failed")
+
+
 def create_app(host, *, testing: bool = False) -> FastAPI:
     app = FastAPI(title="Open Market OS", version=__version__, docs_url=None, redoc_url=None, openapi_url=None,
-                  default_response_class=SafeJSONResponse)
+                  default_response_class=SafeJSONResponse, lifespan=_lifespan)
     app.state.host = host
+    app.state.shutdown_hooks = []
     allowed = set(host.cfg.allowed_host_headers())
     if testing:
         allowed.add("testserver")

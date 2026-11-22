@@ -14,6 +14,8 @@ Settings > MCP > Create bridge token; file mode 0600).
 
 from __future__ import annotations
 
+import logging
+
 import json
 import os
 from pathlib import Path
@@ -159,6 +161,7 @@ def load_token(data_dir: Path) -> str:
 
 
 def serve_stdio(data_dir: Path, base_url: str) -> None:
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # per-request INFO lines are noise on the client's stderr
     api = HostAPI(base_url, load_token(data_dir))
     enabled = None
     perms = api.call("get_quote", "GET", "/api/mcp/self")  # host tells the bridge which tools are enabled

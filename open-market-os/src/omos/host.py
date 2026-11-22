@@ -280,6 +280,9 @@ class Host:
         log.info("Open Market OS host %s started (data: %s)", __version__, self.cfg.data_path)
 
     def stop(self) -> None:
+        if getattr(self, "_stopped", False):  # idempotent: the shutdown hook and `finally` may both call it
+            return
+        self._stopped = True
         for lp in self.loops.values():
             lp.stop_evt.set()
         for lp in self.loops.values():

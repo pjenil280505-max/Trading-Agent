@@ -99,6 +99,18 @@ def folder_digest(folder: Path) -> str:
     return h.hexdigest()
 
 
+def python_interpreter() -> str:
+    """Interpreter for Python process plugins. In the single-file binary, sys.executable is the
+    binary itself, so a separately installed Python 3 is required."""
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    found = shutil.which("python3") or shutil.which("python")
+    if not found:
+        raise PermissionDenied("Python process plugins need Python 3 installed on this computer; "
+                               "the single-file app does not include an interpreter for plugins")
+    return found
+
+
 class PluginManager:
     def __init__(self, db: Database, plugins_dir: Path):
         self.db = db
@@ -217,7 +229,7 @@ class PluginManager:
                "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"}
         if os.name == "nt":
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
-        cmd = [sys.executable, "-I", str(entry)] if entry.suffix == ".py" else [str(entry)]
+        cmd = [python_interpreter(), "-I", str(entry)] if entry.suffix == ".py" else [str(entry)]
         request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
         if len(request) > 20_000_000:
             raise ValidationError("request too large for a plugin")

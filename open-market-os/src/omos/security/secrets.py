@@ -113,8 +113,10 @@ class VaultBackend:
         if env:
             try:
                 self.unlock(env)
-            except SecretStoreError:
-                log.error("OMOS_VAULT_PASSPHRASE did not unlock the vault")
+            except (SecretStoreError, ValidationError) as exc:
+                # a bad environment variable must not stop the host: the vault simply stays locked
+                log.error("OMOS_VAULT_PASSPHRASE did not unlock the vault (%s); secrets stay locked until unlocked "
+                          "in Settings > Secrets", getattr(exc, "message", exc))
 
     @staticmethod
     def _derive(passphrase: str, salt: bytes) -> bytes:

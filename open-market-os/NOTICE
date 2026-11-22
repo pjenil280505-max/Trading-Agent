@@ -1,0 +1,17 @@
+Open Market OS
+Copyright 2026 Open Market OS contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Its web interface bundles KLineChart (https://github.com/klinecharts/KLineChart),
+licensed under the Apache License, Version 2.0, whose NOTICE file reads:
+
+    KLineChart
+    Copyright (c) 2019 lihu
+
+    TradingView Lightweight Charts
+    Copyright (c) 2019 TradingView, Inc. https://www.tradingview.com
+
+The full license and notice texts of bundled web components are shipped with the
+built interface under /third-party/. Other third-party components are listed in
+THIRD_PARTY_NOTICES.md.

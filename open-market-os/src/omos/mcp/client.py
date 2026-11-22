@@ -169,11 +169,21 @@ class MCPClientService:
             parts.append(getattr(c, "text", None) or json.dumps(getattr(c, "model_dump", lambda: str(c))(), default=str))
         text = "\n".join(parts)
         truncated = len(text) > MAX_OUTPUT
+        is_error = bool(_field(res, "is_error", "isError", False))
         self.db.audit(actor, "mcp.call", f"{s['name']}:{tool}", {"ms": now_ms() - started, "bytes": len(text),
-                                                                "is_error": bool(getattr(res, "isError", False))})
-        return {"server": s["name"], "tool": tool, "is_error": bool(getattr(res, "isError", False)),
+                                                                "is_error": is_error})
+        return {"server": s["name"], "tool": tool, "is_error": is_error,
                 "content": text[:MAX_OUTPUT], "truncated": truncated, "untrusted": True,
-                "structured": getattr(res, "structuredContent", None)}
+                "structured": _field(res, "structured_content", "structuredContent")}
+
+
+def _field(res: Any, snake: str, camel: str, default: Any = None) -> Any:
+    """Read a result field across MCP SDK versions (v2 uses snake_case attributes, v1 camelCase).
+    Reading only the v1 name silently returned the default on v2, hiding tool errors."""
+    v = getattr(res, snake, None)
+    if v is None:
+        v = getattr(res, camel, None)
+    return default if v is None else v
 
 
 def parse_command(line: str) -> tuple[str, list[str]]:

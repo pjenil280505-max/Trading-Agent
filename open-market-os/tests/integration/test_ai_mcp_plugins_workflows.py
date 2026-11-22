@@ -139,6 +139,11 @@ ECHO_SERVER = textwrap.dedent('''
         """Add two numbers."""
         return a + b
 
+    @s.tool()
+    def fail() -> str:
+        """Always fails."""
+        raise RuntimeError("boom")
+
     s.run("stdio")
 ''')
 
@@ -150,13 +155,20 @@ def test_mcp_client_stdio_discovery_permissions_and_call(db, tmp_path):
     srv = svc.add("echo", transport="stdio", command=sys.executable, args=[str(script)], timeout_s=30)
     refreshed = svc.refresh(srv["id"])
     names = {t["name"] for t in refreshed["discovered"]["tools"]}
-    assert names == {"echo", "add"}
+    assert names == {"echo", "add", "fail"}
     assert all(t["enabled"] == 0 for t in refreshed["tools"])   # new tools start disabled
     with pytest.raises(PermissionDenied):
         svc.call(srv["id"], "echo", {"text": "hi"})
     svc.set_tool(srv["id"], "echo", True)
     out = svc.call(srv["id"], "echo", {"text": "hi"})
-    assert out["content"] == "echo: hi" and out["untrusted"] is True
+    assert out["content"] == "echo: hi" and out["untrusted"] is True and out["is_error"] is False
+    # regression: errors and structured results were read under v1 attribute names and always lost
+    svc.set_tool(srv["id"], "fail", True)
+    bad = svc.call(srv["id"], "fail", {})
+    assert bad["is_error"] is True and "fail" in bad["content"]  # the SDK hides the exception text itself
+    svc.set_tool(srv["id"], "add", True)
+    added = svc.call(srv["id"], "add", {"a": 2, "b": 3})
+    assert added["is_error"] is False and added["structured"] is not None and "5" in json.dumps(added["structured"])
     assert any(r["action"] == "mcp.call" for r in db.query("SELECT action FROM audit_log"))
 
 

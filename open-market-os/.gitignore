@@ -12,8 +12,7 @@ src/omos/web/dist/
 *.db
 *.db-wal
 *.db-shm
-releases/*.tar.gz
-releases/omos-linux-x86_64
+releases/
 e2e-artifacts/
 scan-reports/
 benchmarks.json
