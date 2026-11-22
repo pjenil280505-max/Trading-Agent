@@ -7,6 +7,12 @@ permissions:
   contents: read
 jobs:
   probe:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04-arm, macos-15-intel, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
     steps:
-      - run: echo "CI reachable"; python3 --version; uname -a
+      - shell: bash
+        run: echo "runner ok"; uname -a; python3 --version || true; ls "/c/Program Files (x86)/Inno Setup 6" 2>/dev/null | head -3 || true
