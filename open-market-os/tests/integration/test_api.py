@@ -45,9 +45,21 @@ def test_host_header_allowlist_and_security_headers(env):
     r = c.get("/api/health", headers={"Host": "evil.example.com"})
     assert r.status_code == 421
     r = c.get("/api/health")
-    assert "default-src 'self'" in r.headers["content-security-policy"]
+    csp = r.headers["content-security-policy"]
+    assert "default-src 'self'" in csp and "script-src 'self'" in csp and "frame-ancestors 'none'" in csp
+    connect = next(d for d in csp.split(";") if d.strip().startswith("connect-src")).split()[1:]
+    assert all(src == "'self'" or src.endswith("//testserver") for src in connect), connect  # no wildcard ws:/wss:
     assert r.headers["x-frame-options"] == "DENY" and r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["cache-control"] == "no-store"
+
+
+def test_csp_websocket_source_is_this_host_only():
+    from omos.api.app import csp_for
+
+    assert "connect-src 'self' ws://127.0.0.1:8765 wss://127.0.0.1:8765;" in csp_for("127.0.0.1:8765")
+    assert "ws://[::1]:8765" in csp_for("[::1]:8765")
+    for bad in ("evil.com; script-src *", "a b", "x'y", ""):
+        assert "connect-src 'self';" in csp_for(bad)  # anything odd: same-origin only, never injected
 
 
 def test_scopes_enforced(env):

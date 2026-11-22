@@ -36,7 +36,7 @@ PAIRING_PRESETS = {
     "paper-control": ["read", "trade:paper"],
     "full": ["read", "trade:paper", "ai", "admin"],
 }
-_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I confusion
+_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I confusion  # pragma: allowlist secret
 
 
 def _hash(secret: str) -> str:

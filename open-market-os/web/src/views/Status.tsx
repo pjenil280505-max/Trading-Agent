@@ -45,6 +45,16 @@ export function Status() {
           {d.backups.length === 0 && <p class="small neg">No backups yet.</p>}
         </Card>
       </div>
+      <Card title="About and third-party notices">
+        <p class="small">Open Market OS {d.version} — Apache License 2.0. Not financial advice; no warranty. Market data belongs to its providers and is subject to their terms.</p>
+        <p class="small">Charts are drawn with <b>KLineChart</b> (Copyright © 2019 lihu, Apache-2.0), which includes code from
+          {' '}<b>TradingView Lightweight Charts</b> (Copyright © 2019 TradingView, Inc., <a href="https://www.tradingview.com" target="_blank" rel="noopener noreferrer">tradingview.com</a>, Apache-2.0).
+          The interface uses <b>Preact</b> (MIT).</p>
+        <p class="small">Full texts: <a href="/third-party/klinecharts-NOTICE.txt" target="_blank">KLineChart NOTICE</a> ·
+          {' '}<a href="/third-party/klinecharts-LICENSE.txt" target="_blank">KLineChart license</a> ·
+          {' '}<a href="/third-party/lightweight-charts-LICENSE.txt" target="_blank">Lightweight Charts license</a> ·
+          {' '}<a href="/third-party/preact-LICENSE.txt" target="_blank">Preact license</a>. Python components are listed in THIRD_PARTY_NOTICES.md.</p>
+      </Card>
     </>
   )
 }

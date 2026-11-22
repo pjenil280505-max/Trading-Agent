@@ -148,7 +148,8 @@ class NewsService:
     def store(self, items: list[dict[str, Any]], known_symbols: list[str]) -> int:
         new = 0
         for it in items:
-            key = hashlib.sha1(re.sub(r"\W+", " ", it["title"].lower()).strip().encode()).hexdigest()
+            # de-duplication key, not a security use
+            key = hashlib.sha1(re.sub(r"\W+", " ", it["title"].lower()).strip().encode(), usedforsecurity=False).hexdigest()
             text = f"{it['title']} {it.get('summary', '')}"
             low = text.lower()
             topics = [t for t, kws in TOPICS.items() if any(k in low for k in kws)]

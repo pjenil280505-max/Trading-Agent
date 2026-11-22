@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -39,9 +40,17 @@ class SafeJSONResponse(JSONResponse):
         return json.dumps(sanitize(content), ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
 
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-       "font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; "
-       "object-src 'none'")
+_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+        "font-src 'self' data:; connect-src 'self'{ws}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; "
+        "object-src 'none'")
+_HOSTPORT = re.compile(r"^(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::\d{1,5})?$")
+
+
+def csp_for(host_header: str) -> str:
+    """CSP with WebSocket access to THIS host only (older browsers do not match ws: against 'self').
+    The Host header was already checked against the allow-list; the pattern check is defence in depth."""
+    ws = f" ws://{host_header} wss://{host_header}" if _HOSTPORT.match(host_header) else ""
+    return _CSP.format(ws=ws)
 
 
 def web_dist() -> Path | None:
@@ -75,7 +84,7 @@ class Guard(BaseHTTPMiddleware):
             if not b.try_acquire():
                 return JSONResponse({"error": "rate_limited", "message": "too many requests"}, status_code=429)
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = CSP
+        response.headers["Content-Security-Policy"] = csp_for(host_header)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"

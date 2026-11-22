@@ -150,7 +150,8 @@ class VaultBackend:
             self._data = {}
 
     def _flush(self) -> None:
-        assert self._key is not None
+        if self._key is None:  # explicit check: asserts vanish under `python -O`
+            raise SecretStoreError("the secret vault is locked; nothing was written", code="vault_locked")
         nonce = os.urandom(12)
         ct = AESGCM(self._key).encrypt(nonce, json.dumps(self._data).encode(), b"omos-vault-v1")
         tmp = self.path.with_suffix(".tmp")
