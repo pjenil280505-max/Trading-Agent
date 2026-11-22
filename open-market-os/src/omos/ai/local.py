@@ -90,7 +90,8 @@ def _extract_tar(fileobj, dest: Path, mode: str) -> None:
         raise OmosError("this Python is too old to unpack the AI runtime safely; update Python")
     try:
         with tarfile.open(fileobj=fileobj, mode=mode) as tf:
-            tf.extractall(dest, filter="data")  # the 'data' filter rejects absolute paths, '..' and links outside dest
+            # the 'data' filter rejects absolute paths, '..' and links outside dest (tested in test_desktop_setup.py)
+            tf.extractall(dest, filter="data")  # nosec B202
     except tarfile.FilterError as exc:
         raise ValidationError(f"the archive contains an unsafe entry and was rejected: {exc}") from exc
     except (tarfile.TarError, EOFError) as exc:
@@ -103,7 +104,7 @@ def _safe_extract_zip(zf: zipfile.ZipFile, dest: Path) -> None:
         target = (root / n).resolve()
         if root != target and root not in target.parents:
             raise ValidationError(f"archive entry escapes the target folder: {n}")
-    zf.extractall(dest)
+    zf.extractall(dest)  # nosec B202 - every member was checked above (tested in test_desktop_setup.py)
 
 
 class LocalAI:

@@ -5,8 +5,9 @@ language with an honest backtester, screeners, news and fundamentals, paper trad
 risk engine, alerts, optional AI analysts and an MCP bridge for AI assistants — with **no paid
 service required**.
 
-> **Status: 0.1.0, early release.** Paper trading only: no live broker adapter has been verified,
-> so no real orders can be sent. Not financial advice. Backtests and AI output are not predictions.
+> **Status: 0.2.0.** Installers for Windows, macOS and Linux and an Android companion app, each
+> tested automatically on real machines. Paper trading only: no live broker adapter has been
+> verified, so no real orders can be sent. Not financial advice. Backtests and AI output are not predictions.
 > See [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) for exactly what works and what does not.
 
 ## Why it is different
@@ -26,7 +27,14 @@ service required**.
   (unofficial, delayed), FRED, ECB, SEC EDGAR), free local AI via Ollama, open-source libraries
   only. Paid AI providers are optional, off by default and budget-capped.
 
-## Quick start (from source)
+## Install (no terminal)
+
+Download the file for your device from the **Releases** page (Windows `…-setup.exe`, Mac `.dmg`,
+Linux `.deb` / `.AppImage`, Android `.apk`), install it, and open **Open Market OS** from your Start
+menu, Applications folder or app launcher. See [START_HERE.md](START_HERE.md) and the
+[installation guide](docs/guides/INSTALLATION_GUIDE.md).
+
+## Quick start (from source, for developers)
 
 Requirements: Python 3.11+, Node.js 20+ (only to build the web UI), Git.
 

@@ -85,3 +85,29 @@ Android APK; hosted CI.
 | RSS feeds | Headlines only; quality and availability depend on each publisher |
 | Hosted AI providers | Cost money per token (except free tiers); availability and terms are theirs |
 | Ollama / local AI | Speed and quality depend on your hardware; small models make more mistakes |
+
+## New in 0.2.0
+
+- **Unsigned installers.** Windows SmartScreen and macOS Gatekeeper ask for confirmation once. The
+  download can be checked against `SHA256SUMS.txt`, which comes from the same release (it detects
+  damaged downloads, not a compromised repository).
+- **Desktop installers were tested by automation only** (fresh GitHub-hosted Windows Server, macOS 15
+  and Ubuntu 22.04 machines): no person has used them on a home PC or Mac yet.
+- **Android app tested on an emulator only.** QR scanning with a camera and phone alerts were not
+  exercised automatically. The app needs the computer to be on, running Open Market OS, on the same
+  network, with network access switched on.
+- **Start at sign-in and keep-awake** write the right operating-system entries (checked), but starting
+  at an actual sign-in and preventing sleep were not observed.
+- **Local AI runtime install** was exercised for real on Linux only; Windows (1.6 GB download) and
+  macOS use the same verified-download path but were not run.
+- **In-app updates** were tested against a simulated release server: there was no published release
+  to update from. Releases must be published (not draft) to be offered.
+- **Streaming:** Coinbase and Kraken streams were verified live; Binance and OKX are parsed from sample
+  messages (their live endpoints were unreachable from the build machine). Polling continues if a
+  stream fails.
+- **Stops are executed by the app**, not held at a broker: a price gap can jump over a stop (the gap
+  scenario in the simulator shows a 12% gap costing about 6% of equity with a 1% risk budget), and
+  stops do not work while the computer is off or asleep.
+- **No live broker and no MetaTrader 5 connection** in this release: real-money trading is impossible.
+- Browser access from phones over HTTPS shows a certificate warning (the certificate is made on your
+  computer); the Android app avoids it by pinning the certificate.

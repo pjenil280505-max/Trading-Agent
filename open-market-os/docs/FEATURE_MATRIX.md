@@ -1,4 +1,4 @@
-# Feature matrix — Open Market OS 0.1.0
+# Feature matrix — Open Market OS 0.2.0
 
 Last updated 2026-11-22. Every item from the master build specification is listed, including the
 ones that are not built.
@@ -17,9 +17,10 @@ ones that are not built.
 
 **Evidence codes:** U = unit tests (`tests/unit`), I = API integration tests (`tests/integration`),
 L = live-network tests (`OMOS_RUN_NETWORK=1`), E = browser end-to-end tests (`scripts/e2e.sh`),
-R = release check (`scripts/verify_release.sh`), M = manual check this session.
-Latest results: 291 pytest cases passed (incl. network and local AI), 12/12 E2E passed (13/13 with the LAN test),
-release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
+R = release check (`scripts/verify_release.sh`), M = manual check this session,
+C = CI on GitHub-hosted machines (`.github/workflows/omos-build.yml`): build, install, smoke test, update, uninstall.
+Latest results (0.2.0): 329 pytest cases passed offline (plus network tests), 13/13 browser E2E, CI green on
+Windows x64, macOS arm64 and x86_64, Linux x86_64 and arm64, and Android (emulator end-to-end).
 
 ## Platform and architecture
 
@@ -29,11 +30,21 @@ release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 | Browser UI served by the host (desktop) | VERIFIED | E (Chromium) |
 | Responsive phone/tablet UI | TESTED | E with an emulated iPhone 13 viewport; no physical phone or tablet was available |
 | PWA install | PARTIAL | Manifest + service worker; installable only on `localhost` or HTTPS origins |
-| Linux x86_64 build and run | VERIFIED | Wheel install in a fresh venv (M), single-file binary (R) |
-| Windows build/run | BLOCKED | No Windows machine available; source install should work but is untested |
-| macOS build/run | BLOCKED | No Mac available; untested |
-| Android APK / Android host mode | NOT STARTED | Phones work as remote screens over the LAN instead |
-| Configuration wizard | PARTIAL | Beginner/advanced modes, welcome hints and Settings pages; no step-by-step first-run wizard |
+| Linux x86_64 and arm64: .deb, AppImage, tar.gz | VERIFIED | C: installed with apt, launched from the menu command, smoke-tested, removed cleanly; AppImage smoke-tested; built on Ubuntu 22.04 (glibc 2.35 or newer needed) |
+| Windows 10/11 installer (x64) | VERIFIED | C on Windows Server (GitHub runner): silent install with Start-menu and desktop shortcuts and start at sign-in, smoke test, update while running, uninstall keeping user data. Not code-signed: SmartScreen asks once. Not tried on a consumer Windows desktop by a person |
+| macOS app (.dmg, Apple Silicon and Intel) | VERIFIED | C on macOS 15 runners: app built, installed from the disk image, smoke-tested. Ad-hoc signed, not notarized: macOS asks once (Privacy & Security > Open Anyway) |
+| Android app (APK) | VERIFIED | C: unit tests, lint, signed release build, end-to-end on an Android 14 emulator against a real host (QR pairing link, pinned HTTPS, signed in with limited permissions, wrong certificate refused). Not tried on a physical phone; QR camera scanning and alert notifications not exercised in CI |
+| First-run setup assistant (system detection, data-source check, local AI, background options) | VERIFIED | I, E |
+| No-terminal operation: icon launcher, background host, quit/restart, diagnostics download | VERIFIED | I (launcher → detached host → quit), C on every desktop OS |
+
+## Market data
+
+| Item | State | Evidence / notes |
+|---|---|---|
+| Free sources: OKX, Coinbase, Kraken, Binance (live), Yahoo (delayed), FRED and ECB (historical), CSV import | VERIFIED | U, L (2026-11-22) |
+| Live streaming over the venues' public WebSockets (Coinbase, Kraken, Binance with its public mirror, OKX) | VERIFIED (Coinbase, Kraken) | U (parsing, reconnect, host integration), L: real ticks received from Kraken and Coinbase. Binance and OKX parsing tested from sample messages; their live endpoints were not reachable from the build machine |
+| Status label on every price: LIVE (streamed), LIVE·poll (polled, with interval), DELAYED, HISTORICAL, SIMULATED, STALE, UNAVAILABLE | VERIFIED | U, E |
+| Stale-data detection; no trading on stale data | VERIFIED | U, simulator |
 
 ## 7. Chart engine (KLineChart 10 behind `web/src/chart/adapter.ts`)
 
@@ -164,6 +175,11 @@ release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 | DCA bots, grid bots | TESTED | U |
 | Multi-timeframe logic | IMPLEMENTED | Through `tf()` in scripts |
 | Multi-symbol bots, AI-driven bots | NOT STARTED | AI can only *propose* orders for a person to approve |
+| Adaptive layered entries (layer count from risk budget and volatility, no fixed maximum) | VERIFIED | U (planning, bot), simulator |
+| Basket risk: all layers checked together, whole basket rejected on any violation, take-back on broker failure | VERIFIED | U |
+| Scenario simulation before start (11 scenarios incl. gaps, spread blow-out, partial fills, outage, restart, broker rejections) | VERIFIED | U, API job, UI |
+| Trailing stops, basket take-profit and expiry | VERIFIED | U, simulator |
+| Plain lifecycle labels (Draft, Testing, Paper trading, Paused, Stopped, Error, Awaiting approval, Live) | VERIFIED | E |
 | Lifecycle: created → configured → validated → backtested → running ⇄ paused → stopped / error / recovering / paper-tested / approved / archived | VERIFIED | U (illegal transitions rejected), E |
 | Start, pause, resume, stop, clone, edit, logs, state history, performance | VERIFIED | U, I, E |
 | Closed-bar decisions; idempotent client order ids; no duplicate orders after restart | VERIFIED | U |
@@ -171,8 +187,10 @@ release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 | Watchdog restarting dead loops, heartbeats | IMPLEMENTED | Loop status and restart counts in System status; the watchdog has no dedicated test |
 | Graceful shutdown on SIGTERM | VERIFIED | I + M (bug fixed in this release: cleanup never ran) |
 | Database corruption recovery from backup | VERIFIED | U |
-| Provider outage → cached data labelled STALE, never fake data | VERIFIED | U, L |
-| Start at login (systemd user unit / launchd / Task Scheduler) | PARTIAL | `omos service` writes the unit; Linux unit generation checked (M); macOS/Windows untested |
+| Provider outage → cached data labelled STALE, never fake data; bots refuse stale data and resume by themselves when it returns | VERIFIED | U, L, simulator |
+| Protective exits keep working after a circuit breaker halts trading (reduce-only), resting entries cancelled | VERIFIED | U, simulator |
+| Start at login (in-app switch: Windows Run key, macOS LaunchAgent, Linux XDG autostart) | TESTED | C writes and removes the entry on each OS; starting at an actual sign-in was not observed |
+| Keep the computer awake while bots run | IMPLEMENTED | Windows SetThreadExecutionState, macOS caffeinate, Linux systemd-inhibit; logic unit-tested, the OS effect not observed |
 | Clock-drift monitoring, broker-disconnection handling | NOT STARTED | No live broker exists yet |
 | Paper broker / local simulator | VERIFIED | U |
 | Live broker or exchange trading adapters, MetaTrader 5 bridge | NOT STARTED | Live trading is impossible in this release by design until an adapter is verified |
@@ -186,7 +204,7 @@ release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 | Daily / weekly loss and drawdown circuit breakers; only a person can resume | VERIFIED | U, I |
 | Total and per-instrument exposure, leverage, open positions, order quantity and value | VERIFIED | U |
 | Orders per minute, trades per day, simultaneous bots | VERIFIED | U |
-| Layer limit reduced to one in high volatility | VERIFIED | U |
+| Layer safety ceilings (12 by default, 4 in high volatility, deepest layer within 30% of price), configurable | VERIFIED | U |
 | Price band for limit/stop prices, no-shorting default, instrument allow/block lists | VERIFIED | U |
 | Emergency stop (pause all bots, cancel all orders, optional flatten) | VERIFIED | U, I, E |
 | Risk event log | VERIFIED | U, UI |
@@ -197,6 +215,7 @@ release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 | Item | State | Evidence / notes |
 |---|---|---|
 | Local models through Ollama (OpenAI-compatible) | VERIFIED | Integration test with `qwen2.5:0.5b`, 2026-11-22 |
+| One-click local AI: official Ollama runtime downloaded and SHA-256-checked, model sized for the hardware, provider registered | VERIFIED (Linux) | I (fake release server, tampering and traversal cases) + real install on Linux: Ollama v0.40.17 downloaded, verified, started, model pulled, chat answered. Windows and macOS runtime install not exercised |
 | LM Studio, llama.cpp server presets | IMPLEMENTED | Same OpenAI-compatible client; not run here |
 | Anthropic Claude, OpenAI, Gemini, Grok, DeepSeek, Mistral, Groq, OpenRouter presets | IMPLEMENTED | Not verified: no API keys in this environment (and they cost money) |
 | Mock (rule-based, clearly labelled "not AI") | VERIFIED | U, I |
@@ -256,10 +275,11 @@ release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 | Item | State | Evidence / notes |
 |---|---|---|
 | Pairing codes with permission presets, per-device tokens, revoke | VERIFIED | I, E |
-| Phones/tablets reaching the host over the LAN (`--allow-remote`) | TESTED | E (`OMOS_E2E_LAN=1`): sign-in by code over the LAN address, limited scopes; live WebSocket over LAN checked with a raw client only (sandbox limitation). Fixed in this release: LAN requests were rejected with 421 |
+| HTTPS for devices on the network with a certificate made on the computer, pinned by the Android app; in-app switch | VERIFIED | I (fingerprint, exchange over HTTPS, kept across restarts), C (Android emulator) |
+| Phones/tablets reaching the host over the LAN (browser) | TESTED | E (`OMOS_E2E_LAN=1`): sign-in by code over the LAN address, limited scopes; live WebSocket over LAN checked with a raw client only (sandbox limitation). Fixed in this release: LAN requests were rejected with 421 |
 | Bottom navigation, single-column charts on phones | TESTED | E (emulated phone) |
 | Device profile (CPU, RAM, disk, battery) adapting chart history, polling, AI model hint | IMPLEMENTED | Shown in System status |
-| GPU/VRAM/thermal-aware tuning | NOT STARTED | Only detects whether `nvidia-smi` exists |
+| GPU/VRAM/thermal-aware tuning | PARTIAL | NVIDIA GPU memory and Apple Silicon detected and used to size the local AI model; no thermal monitoring |
 | Dockable panels, drag-and-drop workspace, multiple windows | NOT STARTED | |
 | Offline mode | PARTIAL | App shell cached; data needs the host |
 
@@ -269,6 +289,8 @@ release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 |---|---|---|
 | Loopback-only default, Host-header allow-list, CSP, token scopes, secret vault | VERIFIED | I, E |
 | Security scans (bandit, pip-audit, npm audit, detect-secrets) | VERIFIED | `scripts/security_scan.sh`, passed 2026-11-22 |
-| Browser E2E tests | VERIFIED | 12/12 |
+| Browser E2E tests | VERIFIED | 13/13 |
+| In-app updates: check, SHA-256-verified download, backup first, install | TESTED | I against a fake GitHub API; no published release existed to update from |
+| Restore a backup from the app, undoable | VERIFIED | I, API |
 | Benchmarks | VERIFIED | [PERFORMANCE_BENCHMARKS.md](PERFORMANCE_BENCHMARKS.md) |
-| Hosted CI | NOT STARTED | Checks are scripts you run locally |
+| Hosted CI | VERIFIED | GitHub Actions: tests and E2E, five desktop builds with install tests, Android with emulator test, draft release with SHA-256 checksums |

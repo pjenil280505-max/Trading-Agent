@@ -1,60 +1,41 @@
-# START HERE
+# Start here
 
-Open Market OS runs on **your own computer**. You open it in a web browser; phones and tablets on
-your home network can join later. Everything starts in **paper mode with simulated money** — nothing
-here can place a real trade.
+Open Market OS is a market workstation that runs on your own computer: charts, research, strategy
+testing, paper trading, bots behind a risk engine, and optional AI. Free, no account, your data stays
+with you. Everything starts with **simulated money**; real-money trading is switched off.
 
-## 1. Install (Linux, about 5 minutes)
+## 1. Download
 
-**Option A — single-file app (Linux x86_64):**
+From the project's **Releases** page, download the file for your device:
 
-```bash
-tar -xzf omos-0.1.0-linux-x86_64.tar.gz
-cd omos-0.1.0-linux-x86_64
-./omos start
-```
+- **Windows:** `OpenMarketOS-0.2.0-windows-x64-setup.exe`
+- **Mac:** `OpenMarketOS-0.2.0-macos-arm64.dmg` (Apple Silicon) or `…-macos-x86_64.dmg` (Intel)
+- **Linux:** `open-market-os_0.2.0_amd64.deb` (Ubuntu/Debian/Mint) or the `.AppImage`
+- **Android phone (companion):** `OpenMarketOS-0.2.0-android.apk`
 
-**Option B — from source (Linux; Windows/macOS untested):** see the
-[installation guide](docs/guides/INSTALLATION_GUIDE.md). In short: Python 3.11+, Node.js 20+, then
-`pip install -e .`, `scripts/build_web.sh`, `omos start`.
+## 2. Install
 
-`omos start` prints a link like `http://127.0.0.1:8765/#code=…`. Open it in your browser within
-10 minutes. It works once; later, run `omos open` for a new one.
+- **Windows:** run the setup file. SmartScreen may say "Windows protected your PC": **More info → Run anyway**.
+- **Mac:** open the disk image, drag the app to **Applications**. First open: **System Settings →
+  Privacy & Security → Open Anyway**.
+- **Linux:** double-click the `.deb` and choose **Install**, or make the AppImage executable and double-click it.
 
-> No desktop keychain (servers, minimal Linux)? Secrets then go into an encrypted file. Start with
-> `OMOS_VAULT_PASSPHRASE='a long passphrase' ./omos start` or unlock it later in Settings → Secrets.
+## 3. Open
 
-## 2. Your first ten minutes
+Open **Open Market OS** from the Start menu, Applications, or the app launcher. It opens in your web
+browser, already signed in, and keeps running in the background (bots and alerts keep working when
+you close the browser). A setup assistant asks a few questions the first time.
 
-1. **Dashboard** — a starter watchlist with crypto (live from exchanges) and stocks/indices
-   (delayed, from Yahoo). Every price shows a label: `REALTIME`, `DELAYED`, `HISTORICAL`,
-   `SIMULATED`, or `STALE` when a source is down.
-2. **Charts** — type a symbol (`AAPL`, `ETH`, `RELIANCE`) and press Enter, or a full id like
-   `OKX:BTC-USDT`. Pick a timeframe, add an indicator from **+ Indicator**, draw with the tool row.
-   The first load of a symbol can take a few seconds.
-3. **Strategy lab** — choose a template (EMA crossover is a good start), set the instrument, press
-   **Run backtest**. Costs are always charged. Then try **Walk-forward**: if out-of-sample results
-   are much worse, the strategy was probably fitted to noise.
-4. **Portfolio → Order ticket** — place a small paper order. Look at "Risk checks" to see the rules
-   every order passes.
-5. **Bots** — create a rule bot from the same template on a paper account, then
-   **Validate → Start**. Bots act only when a bar closes, so a 1-hour bot acts at most once an hour.
-6. **Risk** — find the **EMERGENCY STOP** button now, before you need it.
+## 4. Use (10 minutes)
 
-## 3. Things to know
+1. **Dashboard:** watchlist prices. Every price shows how fresh it is: LIVE, DELAYED, HISTORICAL…
+2. **Charts:** type a symbol (e.g. `BTC`, `AAPL`), add an indicator, draw a trend line.
+3. **Strategy lab:** pick a template, run a backtest, then a walk-forward test.
+4. **Portfolio:** place a paper order (simulated money).
+5. **Bots → + New bot:** for example *Layered entries*. Create → **Validate** → **Simulate** (11
+   market scenarios) → **Start**. Watch it in Logs; **Pause** or **Stop** any time.
+6. **Risk:** find the red **EMERGENCY STOP**.
+7. **Settings → AI:** optional free local AI that runs on your computer.
+8. **Settings → Devices:** pair your phone (scan the QR code with the Android app).
 
-- Bots and alerts run only while this computer is on, awake and online. See the
-  [bot guide](docs/guides/BOT_GUIDE.md) for running 24/7 on a home PC.
-- AI is optional and off by default. The free route is Ollama on your computer
-  ([AI guide](docs/guides/AI_GUIDE.md)). Paid providers stay disabled until you accept a cost warning.
-- To use a phone: restart with `omos start --allow-remote` on a network you trust, then create a
-  pairing code in **Settings → Devices & access**.
-- Back up: **Settings → Backups** (daily automatic backups are on). Restore with
-  `omos restore <file>` while the app is stopped.
-
-## 4. Where to go next
-
-[User guide](docs/guides/USER_GUIDE.md) · [Troubleshooting](docs/guides/TROUBLESHOOTING_GUIDE.md) ·
-[Security](docs/guides/SECURITY_GUIDE.md) · [What works and what doesn't](docs/FEATURE_MATRIX.md)
-
-Not financial advice. Backtests, simulations and AI output do not predict future results.
+To quit: **Settings → General → Quit Open Market OS**. Help: the guides in `docs/guides/`.

@@ -1,63 +1,72 @@
-# Release notes — Open Market OS 0.1.0 (2026-11-22)
+# Open Market OS 0.2.0
 
-First release. **Paper trading only. Verified builds: Linux x86_64 only.** Everything listed here was
-exercised by automated tests in this release unless marked otherwise; the complete state of every
-feature is in [FEATURE_MATRIX.md](FEATURE_MATRIX.md) and limitations in [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+**Download, install, open, use: no terminal.** Paper trading only: real-money trading stays switched
+off, and no live broker connection ships in this release.
 
-## Artifacts
+## Downloads
 
-Built by `scripts/build_release.sh` and checked by `scripts/verify_release.sh` on Linux x86_64.
-They are build outputs, not committed to the repository; rebuild them from the tagged source.
-
-| File | Size | SHA-256 |
+| Your device | File | How to install |
 |---|---|---|
-| `open_market_os-0.1.0-py3-none-any.whl` | 339 KB | `510c7cd328aca446052d2a970dfac54129150e7b187298ebcdfa1d0e4ae23dc2` |
-| `omos-0.1.0-linux-x86_64.tar.gz` (single-file app + licenses) | 52.6 MB | `0ed2d13de5b13e8f07daa153f1a3b3323363cc99f31ac0b08a12ab751cd6c978` |
+| Windows 10/11 (64-bit) | `OpenMarketOS-0.2.0-windows-x64-setup.exe` | Run it. If SmartScreen says "Windows protected your PC", choose More info → Run anyway (the installer is not code-signed). No administrator rights needed. |
+| Mac with Apple Silicon (M1–M4) | `OpenMarketOS-0.2.0-macos-arm64.dmg` | Open it, drag Open Market OS to Applications. First open: System Settings → Privacy & Security → Open Anyway (not notarized). |
+| Intel Mac | `OpenMarketOS-0.2.0-macos-x86_64.dmg` | As above. |
+| Ubuntu, Debian, Mint (64-bit PC) | `open-market-os_0.2.0_amd64.deb` | Double-click to open it in the Software app, then Install. |
+| Other Linux (64-bit PC) | `OpenMarketOS-0.2.0-x86_64.AppImage` | Right-click → Properties → allow executing, then double-click. |
+| Linux on 64-bit ARM (built and tested on Ubuntu 22.04 ARM) | `open-market-os_0.2.0_arm64.deb` or `OpenMarketOS-0.2.0-aarch64.AppImage` | As above. |
+| Android phone or tablet | `OpenMarketOS-0.2.0-android.apk` | Open the file on the phone and allow installing from this source. It connects to Open Market OS on your computer. |
 
-PyInstaller output is not byte-for-byte reproducible, so a rebuild has a different hash; verify your
-own build with `scripts/verify_release.sh`.
+`SHA256SUMS.txt` lists the SHA-256 checksum of every file. Linux `.tar.gz` archives are included for
+manual installs.
 
-**Not built:** Windows installer, macOS package, Android APK (no such build environment was
-available; the source install is expected to work on Windows/macOS but is untested).
+## New in 0.2.0
 
-## What is included
+- **No terminal anywhere.** Installers for Windows, macOS and Linux with menu and desktop entries.
+  The icon starts the app in the background and opens it in your browser, already signed in. Quit,
+  restart, start at sign-in, keep the computer awake while bots run, diagnostics: all in the app.
+- **First-run setup assistant:** detects the computer, checks the free data sources, offers free
+  local AI, and sets the background options.
+- **One-click free local AI:** downloads the official Ollama runtime, checks it against its
+  published SHA-256 checksum, picks a model that suits the computer's memory and graphics card,
+  and connects it. If you already have Ollama, it is used as-is.
+- **Android app:** scan the QR code on the computer's Settings → Devices page; the phone shows the
+  whole app over your home network, encrypted with the computer's own certificate, which the app
+  pins. Optional alerts on the phone.
+- **Live streaming prices** from Coinbase, Kraken, Binance and OKX. Every price carries a label:
+  LIVE, LIVE·poll (polled, with its interval), DELAYED, HISTORICAL, SIMULATED, STALE or UNAVAILABLE.
+  Bots never act on stale data and resume by themselves when fresh data returns.
+- **Adaptive layered entries:** a bot type whose ladder of entries follows a risk budget and the
+  current volatility, with no fixed number of layers. All layers are checked together before
+  anything is placed; if the whole ladder does not fit your limits, none of it is placed.
+- **Simulate before you start:** stress-test a bot on 11 market scenarios (crash, gaps, spread
+  blow-outs, thin markets with partial fills, data outages, restarts, broker rejections).
+- **Safer automation:** after a circuit breaker stops trading, a bot's stop-loss still closes its
+  position; a broker failure can no longer leave an order stuck; tiny leftover DCA orders are gone.
+- **Restore a backup from the app** (and undo it). **Update from the app:** the installer for your
+  computer is downloaded, checked against the release's checksums, your data is backed up first,
+  then the update installs.
+- **Network access** for phones and tablets is a switch in Settings → Devices, and uses HTTPS.
 
-- **Host:** local HTTP API + WebSocket, background loops with watchdog, SQLite with migrations,
-  daily backups and corruption recovery, `omos` command-line tool (start, open, status, doctor,
-  backup, restore, export, token, config, service, mcp, reset).
-- **Market data:** OKX, Coinbase, Kraken, Binance (REALTIME, polled), Yahoo Finance (DELAYED,
-  unofficial), FRED and ECB (HISTORICAL), CSV import, labelled simulator; caching, validation,
-  session-aware gap detection, honest status labels.
-- **Web UI (14 pages):** dashboard, charts (layouts up to 16 cells, sync, 21 drawing tools,
-  Heikin-Ashi, log/% scales, snapshots), watchlists, screener (scheduled scans), news/fundamentals/
-  economic calendar, strategy lab, bots, portfolio, risk, alerts, AI workspace, automation,
-  settings, system status; phone layout; device pairing.
-- **Analysis:** 34 indicators validated against reference libraries with no-look-ahead tests;
-  OMS Script; backtester with costs, gap-aware stops, optimisation, walk-forward, out-of-sample and
-  Monte Carlo.
-- **Trading:** paper broker, single execution gateway, risk engine (per-trade risk, exposure,
-  leverage, rate limits, circuit breakers, emergency stop), rule/DCA/grid bots with restart recovery,
-  alerts and notifications.
-- **AI (optional):** local (Ollama, LM Studio, llama.cpp) or hosted providers; evidence-based
-  analysts, debate, tool use with permission levels; cost tracking and daily budget.
-- **MCP:** `omos mcp` server with a host-enforced 17-tool permission matrix; client for external
-  MCP servers.
-- **Plugins and automation:** declarative and isolated process plugins; trigger/step workflows with
-  dry runs, limits and a kill switch.
+## Tested how
 
-## Verification for this release
+Automated, on 2026-11-22:
+- 329 automated tests pass, plus live-network tests.
+- 13/13 browser end-to-end tests pass.
+- The build pipeline installs each desktop package on a fresh GitHub-hosted machine and smoke-tests
+  the installed app: open → background service → interface → API → restart → quit. This ran on
+  Windows x64, macOS 15 (Apple Silicon and Intel) and Ubuntu (x86_64 and ARM).
+- On Windows it also tests updating while the app runs and uninstalling with your data kept.
+- The Android app is tested on an Android 14 emulator against a real host.
 
-| Check | Result |
-|---|---|
-| `OMOS_RUN_NETWORK=1 pytest` (live providers, local AI via Ollama) | 291 passed |
-| `scripts/e2e.sh` / with `OMOS_E2E_LAN=1` | 12/12 / 13/13 passed |
-| `scripts/security_scan.sh` | passed — 0 HIGH static findings, 0 known-vulnerable packages, 0 secrets |
-| `scripts/verify_release.sh` | passed |
-| Wheel installed into a fresh environment, started, served the UI, stopped cleanly | passed |
-| Coverage | 78% line+branch |
+What was **not** tested:
+- No person used the installers on their own Windows PC or Mac.
+- The Android app was not tried on a physical phone.
+- Starting at sign-in, keeping the computer awake and phone alerts were not observed working.
+- The local AI runtime install was exercised on Linux only.
 
-## Not included
+## Known limits
 
-Live broker/exchange trading, MetaTrader 5, Windows/macOS/Android builds, Renko/point-and-figure/
-baseline charts, bar replay, multi-symbol backtests, visual node editors, hosted CI. See the
-feature matrix for the full list.
+- Unsigned installers: Windows SmartScreen and macOS Gatekeeper ask once.
+- No live broker or MetaTrader 5 connection yet: real-money trading is not possible.
+- Stops are executed by the app: they cannot protect against price gaps, and need the app running.
+
+See KNOWN_ISSUES.md and FEATURE_MATRIX.md in the repository for everything else.

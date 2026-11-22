@@ -24,7 +24,7 @@ aG9zdIcEwKgBFDAMBgNVHRMBAf8EAjAAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAoG
 CCqGSM49BAMCA0gAMEUCIQCzDYO2PWJnCGXyFWuXbvRgfYUZogPVuOWxhoH5bY+o
 mQIgf//yWPbq0ehI7ie/0p4vvb1FpZ6ROF/IpYGjyBcNDRk=
 -----END CERTIFICATE-----"""
-    private val fpA = "ff6326543b603b6ebb0aea6c098e125db31719a0dabd6b5edf901690bd187865"
+    private val fpA = "ff6326543b603b6ebb0aea6c098e125db31719a0dabd6b5edf901690bd187865"  // pragma: allowlist secret (public fingerprint of a throwaway test certificate)
     private val pemB = """-----BEGIN CERTIFICATE-----
 MIIByDCCAW+gAwIBAgIUCVDkG0XPLksW9Dvg7tPRQDLeGegwCgYIKoZIzj0EAwIw
 RjEdMBsGA1UEAwwUT3BlbiBNYXJrZXQgT1Mgb24gdm0xJTAjBgNVBAoMHE9wZW4g
@@ -37,7 +37,7 @@ aG9zdDAMBgNVHRMBAf8EAjAAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAoGCCqGSM49
 BAMCA0cAMEQCIBTD2Z+DjWZiIqYaHkyyl8xYudaFYjMihcx7PJQVjC4SAiB3PC7d
 h34leQtuveotO6KrYOMvJbGB1m/VCMwJYCJoeg==
 -----END CERTIFICATE-----"""
-    private val fpB = "33bd2d00a6ade04ae0a7774afe9990a65929a4ce96df1521141e93f942282fcf"
+    private val fpB = "33bd2d00a6ade04ae0a7774afe9990a65929a4ce96df1521141e93f942282fcf"  // pragma: allowlist secret (public fingerprint of a throwaway test certificate)
 
     private fun cert(pem: String) = CertificateFactory.getInstance("X.509")
         .generateCertificate(ByteArrayInputStream(pem.toByteArray())) as X509Certificate
