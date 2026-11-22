@@ -163,7 +163,7 @@ def create_app(host, *, testing: bool = False) -> FastAPI:
     @app.websocket("/api/ws")
     async def ws(socket: WebSocket):
         hh = (socket.headers.get("host") or "").lower().rsplit(":", 1)[0]
-        if hh not in allowed:
+        if hh not in allowed and not (host.cfg.allow_remote and hh in host.cfg.allowed_host_headers()):  # new LAN address
             await socket.close(code=4403)
             return
         await socket.accept()

@@ -169,6 +169,7 @@ function App() {
         </nav>
         <div class="sp" />
         <div class="small muted" style="padding:12px 16px">
+          {navigator.userAgent.includes('OpenMarketOSApp') && <div style="margin-bottom:8px"><a href="omos-app://settings">⚙ Phone app settings (alerts, pairing)</a></div>}
           <div>{who?.name} · {who?.scopes.join(', ')}</div>
           <div>{online ? '● live updates' : '○ reconnecting…'}</div>
           <div style="margin-top:6px" class="row">
