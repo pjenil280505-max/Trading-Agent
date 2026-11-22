@@ -1,6 +1,6 @@
 """Bar-based backtesting engine.
 
-Execution model (documented in docs/BACKTESTING.md):
+Execution model (documented in docs/reference/BACKTESTING.md):
 
 * Signals are evaluated on the CLOSE of bar ``i`` and filled on the OPEN of bar ``i+1``
   (``fill="next_open"``, the default). ``fill="close"`` fills on the signal bar's close and is

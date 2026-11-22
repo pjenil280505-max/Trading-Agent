@@ -1,6 +1,6 @@
 """Technical indicators on numpy arrays.
 
-Conventions (documented in docs/INDICATORS.md):
+Conventions (documented in docs/reference/INDICATORS.md):
 
 * Every function returns arrays the same length as its input, with ``NaN`` during
   the warm-up period. No value ever depends on a later bar (no look-ahead).

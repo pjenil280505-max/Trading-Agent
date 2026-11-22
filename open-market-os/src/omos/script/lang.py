@@ -1,7 +1,7 @@
 """OMS Script — a small, sandboxed, vectorised language for indicators, strategies,
 screener formulas and alert conditions.
 
-Safety properties (enforced here, tested in tests/unit/test_script.py and tests/security):
+Safety properties (enforced here, tested in tests/unit/test_script.py):
 
 * Hand-written lexer/parser -> AST -> evaluator. No ``eval``/``exec``, no attribute
   access, no imports, no loops, no user-defined functions: every program terminates.
@@ -11,7 +11,7 @@ Safety properties (enforced here, tested in tests/unit/test_script.py and tests/
 * Hard limits on source size, statements, AST nodes, nesting depth, window lengths and
   evaluation wall-clock time.
 
-See docs/SCRIPT_LANGUAGE.md for the user guide.
+See docs/reference/SCRIPT_LANGUAGE.md for the user guide.
 """
 
 from __future__ import annotations

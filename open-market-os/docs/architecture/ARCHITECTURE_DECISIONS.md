@@ -65,7 +65,7 @@ Each entry gives the decision, why we made it, and what it costs. Entries are ne
   - Sandboxing arbitrary Python in-process cannot be made secure.
   - A purpose-built language can be made safe, and it can be checked for look-ahead mechanically: `x[n]` only ever looks backwards, and `tf()` only reads higher-timeframe bars that have already closed.
 - **Cost:**
-  - It is not Pine Script and does not claim compatibility. Syntax is documented in `docs/SCRIPT_LANGUAGE.md`.
+  - It is not Pine Script and does not claim compatibility. Syntax is documented in `docs/reference/SCRIPT_LANGUAGE.md`.
   - Users who need full Python can write a process plugin (ADR-009).
 
 ## ADR-006 — One order path: gateway, then risk engine, then broker
@@ -156,6 +156,6 @@ The UI talks only to `web/src/chart/adapter.ts`. Indicator values are calculated
 | R3 | An AI or MCP agent causes an unwanted action | Medium | High | Permission levels enforced in code. AI can only propose orders. The risk engine cannot be bypassed. Every tool call is logged. |
 | R4 | A bug in the backtester inflates results | Medium | High | Look-ahead tests (appending future bars cannot change past decisions). Fees and slippage on by default. Independent cross-checks. |
 | R5 | Android OS kills background work | High | Medium | Bots run on a PC host; Android is a remote control. Android host mode is labelled experimental. |
-| R6 | Credential leak | Low | Critical | OS keyring or encrypted vault. Log redaction. Secrets never sent to AI. Secret scanning in CI. |
+| R6 | Credential leak | Low | Critical | OS keyring or encrypted vault. Log redaction. Secrets never sent to AI. Secret scanning with `scripts/security_scan.sh` (no hosted CI in 0.1.0). |
 | R7 | Supply-chain compromise | Low | High | Minimal dependencies, lockfiles, `pip-audit` and `npm audit`, license scan. |
 | R8 | One person maintaining a huge scope | High | Medium | A feature matrix that reflects reality; stable core modules prioritised over breadth. |
