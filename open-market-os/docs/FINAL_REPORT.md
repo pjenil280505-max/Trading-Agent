@@ -5,7 +5,7 @@ Date: 2026-11-22 · Source: `open-market-os/` on branch `ccr-80d6e707-jb6y48`
 **The short version:** a working, tested, local-first market workstation with charts, indicators, a
 strategy language and honest backtester, screener, research, paper trading, bots behind a
 non-bypassable risk engine, optional AI and MCP — at zero cost. It is **not** finished as specified:
-it cannot trade real money (no live broker adapter), only Linux builds were verified, and 47 of the
+it cannot trade real money (no live broker adapter), only Linux builds were verified, and 37 of the
 167 tracked feature items are not started, not supported or blocked. Nothing below claims more than
 was tested.
 
