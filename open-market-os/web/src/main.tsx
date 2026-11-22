@@ -19,6 +19,7 @@ import { AIWorkspace } from './views/AI'
 import { Automation } from './views/Automation'
 import { Settings } from './views/Settings'
 import { Status } from './views/Status'
+import { SetupWizard } from './views/Setup'
 
 type Route = { path: string; label: string; icon: string; view: () => any; advanced?: boolean; section?: string; mobile?: boolean }
 const ROUTES: Route[] = [
@@ -69,7 +70,8 @@ function SignIn(p: { onDone: () => void }) {
     <div style="display:flex;align-items:center;justify-content:center;min-height:100%;padding:16px">
       <div class="card" style="max-width:460px;width:100%">
         <h2>Sign in to Open Market OS</h2>
-        <p class="muted">This app runs on your own computer. On that computer, run <code>omos open</code> to get a sign-in link.
+        <p class="muted">This app runs on your own computer. On that computer, open <b>Open Market OS</b> from the Start menu,
+          Applications folder or app launcher: it signs you in automatically.
           On a phone or tablet, ask for a <b>pairing code</b> in Settings → Devices on the computer and type it here.</p>
         <Field label="Pairing or sign-in code">
           <input value={code} autocomplete="one-time-code" onInput={(e) => setCode((e.target as HTMLInputElement).value)} placeholder="e.g. 7K9MXQ2P" />
@@ -92,6 +94,7 @@ function App() {
   const [authed, setAuthed] = useState<boolean | null>(null)
   const [menu, setMenu] = useState(false)
   const [online, setOnline] = useState(false)
+  const [setup, setSetup] = useState(false)
 
   useEffect(() => { document.documentElement.dataset.theme = pr.theme }, [pr.theme])
 
@@ -103,7 +106,12 @@ function App() {
     }
     if (!getToken()) { setAuthed(false); return }
     try {
-      me.set(await get('/auth/me'))
+      const who = await get('/auth/me')
+      me.set(who)
+      if (who.scopes.includes('admin')) {
+        // first run on this computer: show the setup assistant (phones and limited devices never see it)
+        get('/setup').then((st) => setSetup(!st.completed)).catch(() => {})
+      }
       setAuthed(true)
       live.connect()
       get('/device').then((d) => setDeviceTier(d.profile.tier)).catch(() => {})
@@ -137,6 +145,7 @@ function App() {
 
   if (authed === null) return <div class="muted" style="padding:24px">Loading…</div>
   if (!authed) return <><SignIn onDone={() => void boot()} /><Toasts /></>
+  if (setup) return <><SetupWizard onDone={() => { setSetup(false); navigate('/') }} /><Toasts /></>
 
   const visible = ROUTES.filter((r) => !r.advanced || pr.mode === 'advanced')
   const current = ROUTES.find((r) => r.path === route) || ROUTES[0]

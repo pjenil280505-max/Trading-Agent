@@ -36,7 +36,11 @@ async function signedInPage(opts = {}) {
   const page = await ctx.newPage()
   const problems = watch(page)
   await page.goto(signInUrl())
-  await page.waitForSelector('.shell', { timeout: 20000 })
+  await page.locator('.shell, .wizard').first().waitFor({ timeout: 20000 })
+  if (await page.locator('.wizard').count()) {  // keep tests independent of the setup-assistant test
+    await page.getByRole('button', { name: 'Skip setup' }).click()
+    await page.waitForSelector('.shell', { timeout: 20000 })
+  }
   return { ctx, page, problems }
 }
 
@@ -95,6 +99,37 @@ function rawRequest(method, urlPath, headers = {}) {
 ;(async () => {
   browser = await chromium.launch()
   console.log(`E2E against ${BASE}`)
+
+  await test('first run: setup assistant detects the computer, checks sources, offers local AI, finishes', async (setPage) => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    const page = await ctx.newPage()
+    setPage(page)
+    const problems = watch(page)
+    await page.goto(signInUrl())
+    await page.locator('.wizard').waitFor({ timeout: 20000 })
+    await page.getByText('Performance profile', { exact: true }).waitFor()
+    assert(await page.locator('text=paper trading').count() > 0, 'welcome step states paper trading')
+    await page.getByRole('button', { name: 'Next' }).click()
+    // the source check needs the internet; either the results table or the offline warning must appear
+    await page.locator('.wizcard table.t, .wizcard .alertbox.warn').first().waitFor({ timeout: 45000 })
+    await page.getByRole('button', { name: 'Next' }).click()
+    await page.locator('text=Recommended model').waitFor({ timeout: 15000 })
+    assert(await page.getByRole('button', { name: /Set up free local AI|Use this model|Download and use/ }).count() === 1, 'local AI action offered')
+    await page.getByRole('button', { name: 'Continue' }).click()
+    // never let the test write a real start-at-login entry for the user running it
+    const auto = page.locator('label.row', { hasText: 'Start Open Market OS when I sign in' }).locator('input')
+    if (await auto.isChecked()) await auto.uncheck()
+    await page.getByRole('button', { name: 'Next' }).click()
+    await page.getByRole('button', { name: 'Start using Open Market OS' }).click()
+    await page.waitForSelector('.shell', { timeout: 20000 })
+    await page.reload()
+    await page.waitForSelector('.shell', { timeout: 20000 })
+    assert(await page.locator('.wizard').count() === 0, 'setup assistant does not come back once finished')
+    const st = await page.evaluate(async () => (await fetch('/api/setup', { headers: { Authorization: `Bearer ${localStorage.getItem('omos.token')}` } })).json())
+    assert(st.completed === true, 'setup recorded as completed')
+    assert(problems.length === 0, problems.join('; '))
+    await ctx.close()
+  })
 
   await test('sign-in: wrong code is refused, one-time link signs in and survives reload', async (setPage) => {
     const ctx = await browser.newContext()

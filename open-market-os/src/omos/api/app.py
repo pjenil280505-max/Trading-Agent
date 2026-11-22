@@ -154,8 +154,10 @@ def create_app(host, *, testing: bool = False) -> FastAPI:
 
     # -- business routes -----------------------------------------------------------------------
     from omos.api.routes import router
+    from omos.api.routes_system import router as system_router
 
     app.include_router(router)
+    app.include_router(system_router)
 
     # -- WebSocket: first message must be {"type":"auth","token":...} --------------------------------
     @app.websocket("/api/ws")

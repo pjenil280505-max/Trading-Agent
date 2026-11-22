@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { del, get, patch, post, put } from '../api'
 import { Badge, Btn, Card, Confirm, Empty, ErrorBox, Field, Modal, StatusBadge, Tabs, useLoad } from '../components/ui'
 import { can, errText, fmtNum, fmtTime, prefs, toast, useStore } from '../store'
+import { LocalAIPanel, SystemControls } from './Setup'
 
 type Tab = 'general' | 'data' | 'devices' | 'secrets' | 'ai' | 'mcp' | 'plugins' | 'backups' | 'live' | 'audit'
 
@@ -43,6 +44,7 @@ function General() {
   const dev = useLoad(() => get('/device'))
   const [poll, setPoll] = useState<number | null>(null)
   return (
+    <>
     <Card title="General">
       <div class="row">
         <Field label="Theme (this device)"><select value={pr.theme} onChange={(e) => prefs.set((x) => ({ ...x, theme: (e.target as HTMLSelectElement).value as 'dark' }))}><option value="dark">Dark</option><option value="light">Light</option></select></Field>
@@ -58,6 +60,8 @@ function General() {
         <label class="row small"><input type="checkbox" checked={s.data['notify.desktop'] ?? false} onChange={(e) => save({ 'notify.desktop': (e.target as HTMLInputElement).checked })} /> OS desktop notifications on the host computer</label>
       </div>}
     </Card>
+    {can('admin') && <SystemControls />}
+    </>
   )
 }
 
@@ -198,6 +202,7 @@ function AISettings() {
   const toggle = (lv: string) => save({ 'ai.tool_levels': levels.includes(lv) ? levels.filter((x) => x !== lv) : [...levels, lv] })
   return (
     <>
+      {can('admin') && <Card title="Free local AI (runs on this computer)"><LocalAIPanel onReady={() => provs.reload()} /></Card>}
       <Card title="AI providers (optional)">
         <ErrorBox error={provs.error} />
         <table class="t"><tbody>{(provs.data || []).map((p) => <tr>
@@ -208,7 +213,7 @@ function AISettings() {
             try { await patch(`/ai/providers/${p.id}`, { enabled: !p.enabled }); provs.reload() } catch (e) { if (!p.is_local) setAck(p); else toast(errText(e), 'error') }
           }}>{p.enabled ? 'Enabled' : 'Enable'}</Btn></td>
           <td><Btn sm kind="ghost" onClick={async () => { if (confirm(`Remove ${p.name} and its stored key?`)) { await del(`/ai/providers/${p.id}`); provs.reload() } }}>Remove</Btn></td></tr>)}</tbody></table>
-        {provs.data?.length === 0 && <Empty>No providers. Ollama (free, runs on this computer) is the recommended start: install it from ollama.com and run <code>ollama pull qwen2.5:0.5b</code>.</Empty>}
+        {provs.data?.length === 0 && <Empty>No providers yet. The free local AI above is the recommended start; hosted models need your own API key.</Empty>}
         <h3>Add a provider</h3>
         <div class="row">
           <Field label="Preset"><select value={f.preset} onChange={(e) => { const k = (e.target as HTMLSelectElement).value; setF({ ...f, preset: k, name: k }) }}>

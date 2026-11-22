@@ -93,7 +93,15 @@ def cmd_start(args) -> int:
     elif args.host:
         cfg.host = args.host
     cfg.ensure_dirs()
+    if getattr(args, "managed", False) and (sys.stdout is None or not sys.stdout.isatty()):
+        # started by the desktop launcher or at login: no console, so keep output in a log file
+        console = open(cfg.logs_path / "host-console.log", "a", buffering=1, encoding="utf-8")  # noqa: SIM115
+        sys.stdout = sys.stderr = console
     setup_logging(cfg.log_level, cfg.logs_path)
+    if getattr(args, "wait_port", False):  # restart: wait for the previous host to release the port
+        end = time.monotonic() + 90
+        while _port_in_use("127.0.0.1", cfg.port) and time.monotonic() < end:
+            time.sleep(0.5)
     if _port_in_use("127.0.0.1", cfg.port):
         print(f"Port {cfg.port} is already in use — is Open Market OS already running? Try 'omos open'.", file=sys.stderr)
         return 2
@@ -118,12 +126,21 @@ def cmd_start(args) -> int:
         ssl = {"ssl_certfile": cfg.tls_certfile, "ssl_keyfile": cfg.tls_keyfile}
     runtime = _write_runtime(cfg)
     app.state.shutdown_hooks = [lambda: _clear_runtime(runtime), host.stop]
+    server = uvicorn.Server(uvicorn.Config(app, host=cfg.effective_bind(), port=cfg.port, log_level="warning",
+                                           access_log=False, **ssl))
+    app.state.server = server  # lets the UI request a clean shutdown or restart
     try:
-        uvicorn.run(app, host=cfg.effective_bind(), port=cfg.port, log_level="warning", access_log=False, **ssl)
+        server.run()
     finally:
         _clear_runtime(runtime)
         host.stop()
     return 0
+
+
+def cmd_launch(args) -> int:
+    from omos.desktop import launch
+
+    return launch(open_browser=not args.no_browser)
 
 
 def cmd_open(args) -> int:
@@ -329,7 +346,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--allow-remote", action="store_true", help="allow paired devices on your network")
     s.add_argument("--no-browser", action="store_true")
     s.add_argument("--demo", action="store_true", help="enable the SIMULATED data provider (labelled, not real prices)")
+    s.add_argument("--managed", action="store_true", help=argparse.SUPPRESS)
+    s.add_argument("--wait-port", action="store_true", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_start)
+    la = sub.add_parser("launch", help="start in the background if needed and open the app (what the desktop icon does)")
+    la.add_argument("--no-browser", action="store_true")
+    la.set_defaults(fn=cmd_launch)
     o = sub.add_parser("open", help="open the UI with a fresh sign-in link")
     o.add_argument("--print-only", action="store_true")
     o.set_defaults(fn=cmd_open)

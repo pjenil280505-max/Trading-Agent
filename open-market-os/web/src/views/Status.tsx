@@ -1,7 +1,7 @@
 import { useEffect } from 'preact/hooks'
-import { get } from '../api'
+import { get, getToken } from '../api'
 import { Badge, Btn, Card, ErrorBox, KV, useLoad } from '../components/ui'
-import { fmtNum, fmtTime } from '../store'
+import { errText, fmtNum, fmtTime, toast } from '../store'
 
 export function Status() {
   const s = useLoad(() => get('/system/status'))
@@ -13,7 +13,18 @@ export function Status() {
   const dev = d.device
   return (
     <>
-      <div class="alertbox">{d.note_24x7} For a full diagnostic report run <code>omos doctor</code> on the host computer.</div>
+      <div class="alertbox row">{d.note_24x7}<span class="sp" />
+        <Btn sm onClick={async () => {
+          try {
+            const r = await fetch('/api/system/diagnostics', { headers: { Authorization: `Bearer ${getToken()}` } })
+            if (!r.ok) throw new Error((await r.json()).message || r.statusText)
+            const a = document.createElement('a')
+            a.href = URL.createObjectURL(await r.blob())
+            a.download = (r.headers.get('content-disposition') || '').split('filename=')[1]?.replace(/"/g, '') || 'omos-diagnostics.json'
+            a.click()
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+          } catch (e) { toast(errText(e), 'error') }
+        }}>Download diagnostics</Btn></div>
       <Card title="Host" actions={<Btn sm kind="ghost" onClick={s.reload}>Refresh</Btn>}>
         <KV items={[['Version', d.version], ['Uptime', `${Math.floor(up / 3600)} h ${Math.floor((up % 3600) / 60)} min`], ['Listening on', `${d.bind}:${d.port}`],
           ['Other devices', d.remote_access ? 'allowed (LAN)' : 'this computer only'], ['Database schema', `v${d.schema_version}`], ['Live-chart subscriptions', d.subscriptions],

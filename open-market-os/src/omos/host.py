@@ -24,6 +24,7 @@ import numpy as np
 
 from omos import __version__
 from omos.ai.agents import AgentService, EvidenceBuilder
+from omos.ai.local import LocalAI
 from omos.ai.providers import AIProviderService
 from omos.alerts.service import AlertService, NotificationService
 from omos.automation.workflows import WorkflowEngine
@@ -32,9 +33,11 @@ from omos.backtest.strategies import StrategyService
 from omos.bots.service import BotRunner, BotService
 from omos.charts import ChartService
 from omos.config import HostConfig
+from omos.desktop import KeepAwake
 from omos.device.profile import detect
 from omos.errors import OmosError
 from omos.events import EventBus
+from omos.jobs import JobRegistry
 from omos.execution.gateway import ExecutionGateway
 from omos.marketdata.service import MarketDataService
 from omos.marketdata.sessions import get_session
@@ -129,6 +132,9 @@ class Host:
             "screener": self.screener, "bots": self.bots, "agents": self.agents, "mcp_client": self.mcp_client,
             "backtest_fn": self.run_backtest, "strategy_source": lambda sid: self.strategies.get(sid)["source"]}, self.bus)
         self.device = detect(str(cfg.data_path))
+        self.jobs = JobRegistry(publish=self.bus.publish)
+        self.local_ai = LocalAI(cfg.data_path)
+        self.keep_awake = KeepAwake()
         self.load_plugin_providers()
         self.subscriptions: dict[tuple[str, str], dict[str, Any]] = {}
         self._sub_lock = threading.Lock()
@@ -227,6 +233,7 @@ class Host:
             except OmosError:
                 log.exception("equity snapshot failed")
         self.auth.cleanup()
+        self._power()
         last = self.db.get_setting("backup.last_auto", 0)
         if now_ms() - last > 86_400_000 and self.db.get_setting("backup.auto", True):
             path = backup_database(self.cfg.db_path, self.cfg.backups_path, label="auto")
@@ -237,6 +244,28 @@ class Host:
                 old.unlink(missing_ok=True)
             log.info("automatic backup written to %s", path)
         self.db.heartbeat("host", {"version": __version__, "pid": __import__("os").getpid()})
+
+    def running_bots(self) -> int:
+        row = self.db.query_one("SELECT COUNT(*) AS n FROM bots WHERE state = 'running'")
+        return int(row["n"]) if row else 0
+
+    def _power(self) -> None:
+        """Keep the computer awake while bots run (setting power.keep_awake, on by default)."""
+        want = bool(self.db.get_setting("power.keep_awake", True)) and self.running_bots() > 0
+        self.keep_awake.set(want)
+
+    def _start_local_ai(self) -> None:
+        """Bring the app-managed Ollama back up after a restart, if the user set it up."""
+        if not self.db.get_setting("ai.local.managed", False) or not self.local_ai.binary():
+            return
+        def run() -> None:
+            try:
+                if not self.local_ai._probe(self.local_ai.system_port):
+                    self.local_ai.start_managed(wait_s=60)
+            except OmosError as exc:
+                log.warning("local AI did not start: %s", exc.message)
+                self.notifier.notify("Local AI did not start", exc.message, level="warning", category="system")
+        threading.Thread(target=run, name="local-ai-start", daemon=True).start()
 
     def _automation(self) -> None:
         self.workflows.tick()
@@ -281,6 +310,7 @@ class Host:
             lp.start()
         self.loops["watchdog"] = Loop("watchdog", self._watchdog, 15.0, self.db)
         self.loops["watchdog"].start()
+        self._start_local_ai()
         log.info("Open Market OS host %s started (data: %s)", __version__, self.cfg.data_path)
 
     def stop(self) -> None:
@@ -293,6 +323,8 @@ class Host:
             if lp.thread:
                 lp.thread.join(timeout=10)
         self.market.persist_health()
+        self.keep_awake.set(False)
+        self.local_ai.stop_managed()
         self.db.heartbeat("host", {"stopped": True})
         log.info("host stopped cleanly")
 
@@ -307,5 +339,8 @@ class Host:
             "emergency_stop": self.risk.global_halt(), "schema_version": self.db.schema_version(),
             "backups": list_backups(self.cfg.backups_path)[:5],
             "automation_enabled": bool(self.db.get_setting("automation.enabled", True)),
+            "keep_awake": {**self.keep_awake.status(), "enabled": bool(self.db.get_setting("power.keep_awake", True)),
+                           "running_bots": self.running_bots()},
+            "setup_completed": bool(self.db.get_setting("setup.completed", False)),
             "note_24x7": "Bots and alerts run only while this computer is on, awake and online.",
         }

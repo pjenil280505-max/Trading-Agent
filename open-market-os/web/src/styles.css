@@ -128,3 +128,18 @@ details summary { cursor: pointer; }
   table.t { font-size: 12px; }
   .hide-m { display: none !important; }
 }
+
+/* setup assistant, background jobs */
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.wizard { min-height: 100%; display: flex; align-items: flex-start; justify-content: center; padding: 24px 16px; }
+.wizcard { max-width: 760px; width: 100%; }
+.wizcard h2 { font-size: 18px; margin: 4px 0; }
+.steps { display: flex; gap: 6px; list-style: none; padding: 0; margin: 12px 0; flex-wrap: wrap; counter-reset: st; }
+.steps li { counter-increment: st; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.steps li::before { content: counter(st) ". "; }
+.steps li.on { border-color: var(--accent); color: var(--text); }
+.steps li.done { color: var(--ok); border-color: var(--ok); }
+.jobprogress { border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.jobprogress .bar { height: 8px; background: var(--panel2); border-radius: 999px; overflow: hidden; }
+.jobprogress .bar span { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+label.row input[type=checkbox] { width: 18px; height: 18px; flex: none; }

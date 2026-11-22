@@ -15,6 +15,24 @@ from typing import Any
 import psutil
 
 
+def _gpu() -> dict[str, Any]:
+    """NVIDIA GPU memory (used to size the local AI model). Apple Silicon shares RAM, so RAM decides there."""
+    out: dict[str, Any] = {"nvidia": shutil.which("nvidia-smi") is not None}
+    if out["nvidia"]:
+        import subprocess
+        try:
+            r = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],  # noqa: S603,S607
+                               capture_output=True, text=True, timeout=5, check=False)
+            rows = [x.rsplit(",", 1) for x in r.stdout.strip().splitlines() if "," in x]
+            if rows:
+                out["name"] = rows[0][0].strip()
+                out["vram_gb"] = round(max(float(m) for _, m in rows) / 1024, 1)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    out["apple_silicon"] = platform.system() == "Darwin" and platform.machine() == "arm64"
+    return out
+
+
 def detect(data_dir: str | None = None) -> dict[str, Any]:
     vm = psutil.virtual_memory()
     du = shutil.disk_usage(data_dir or os.getcwd())
@@ -22,7 +40,7 @@ def detect(data_dir: str | None = None) -> dict[str, Any]:
         batt = psutil.sensors_battery()
     except (AttributeError, NotImplementedError, OSError):
         batt = None
-    gpu = {"nvidia": shutil.which("nvidia-smi") is not None}
+    gpu = _gpu()
     info = {
         "os": platform.system(), "os_release": platform.release(), "machine": platform.machine(),
         "python": platform.python_version(),
