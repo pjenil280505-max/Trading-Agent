@@ -31,6 +31,7 @@ from typing import Any
 import numpy as np
 
 from omos.backtest.engine import BacktestConfig, backtest_script
+from omos.bots import layered
 from omos.errors import InvalidState, NotFound, OmosError, ValidationError
 from omos.events import EventBus
 from omos.execution.gateway import ExecutionGateway, TradingContext
@@ -60,7 +61,7 @@ TRANSITIONS: dict[str, set[str]] = {
     "stopped": {"running", "configured", "archived", "backtested", "paper_tested"},
     "archived": set(),
 }
-KINDS = ("rule", "dca", "grid")
+KINDS = ("rule", "dca", "grid", "layered")
 MAX_CONSECUTIVE_ERRORS = 5
 
 
@@ -159,6 +160,10 @@ class BotService:
             if out["qty_per_level"] <= 0:
                 raise ValidationError("grid needs a positive qty_per_level")
             out.update(lower=lo, upper=hi, levels=levels)
+        elif kind == "layered":
+            out.update(layered.normalise(out))
+            if out["entry_condition"]:
+                parse(f"__c = {out['entry_condition']}\n")
         return out
 
     def validate(self, bot_id: int, *, actor: str = "ui") -> dict[str, Any]:
@@ -168,6 +173,14 @@ class BotService:
             raise ValidationError(f"only {len(candles)} bars of data available; need at least 50 to validate")
         if b["kind"] == "rule":
             run(b["config"]["script"], candles)  # proves the script evaluates on real data
+        if b["kind"] == "layered":
+            if b["config"].get("entry_condition"):
+                evaluate_expression(b["config"]["entry_condition"], candles)
+            lim = self.risk.limits(b["account_id"])
+            if b["config"]["basket_risk_pct"] > lim.max_position_risk_pct:
+                raise ValidationError(f"the basket risk budget ({b['config']['basket_risk_pct']}% of equity) is above this "
+                                      f"account's position risk limit ({lim.max_position_risk_pct}%): every basket would "
+                                      "be rejected. Lower the budget or raise the limit on the Risk page.")
         self._set_flag(bot_id, "validated_at", now_ms())
         self._transition(b, "validated", f"validated by {actor} on {len(candles)} {candles.status.value} bars")
         return self.get(bot_id)
@@ -175,7 +188,7 @@ class BotService:
     def backtest(self, bot_id: int, *, limit: int = 2000, actor: str = "ui") -> dict[str, Any]:
         b = self.get(bot_id)
         if b["kind"] != "rule":
-            raise ValidationError("backtests are available for rule bots")
+            raise ValidationError("backtests are available for rule bots; layered bots are tested with Simulate")
         candles = self.market.get_candles(b["instrument_id"], b["timeframe"], limit=limit)
         cfg = BacktestConfig(sizing=b["config"]["sizing"], size_value=b["config"]["size_value"],
                              allow_short=b["config"].get("allow_short", False))
@@ -338,9 +351,10 @@ class TickResult:
 class BotRunner:
     """Evaluates running bots on each newly CLOSED bar. Thread-based; driven by the host loop."""
 
-    def __init__(self, bots: BotService, *, tick_s: float = 10.0):
+    def __init__(self, bots: BotService, *, tick_s: float = 10.0, clock=now_ms):
         self.bots = bots
         self.tick_s = tick_s
+        self.clock = clock  # simulations run on simulated time
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.last_tick = 0
@@ -388,6 +402,9 @@ class BotRunner:
         self.bots.db.heartbeat("bot_runner", {"tick_s": self.tick_s})
         results = []
         for b in self.bots.list():
+            if b["state"] == "error" and b["flags"].get("data_error"):
+                self._try_data_recovery(b)
+                continue
             if b["state"] != "running":
                 continue
             if self._backoff.get(b["id"], 0) > time.monotonic():
@@ -405,7 +422,28 @@ class BotRunner:
             self.bots.db.execute("UPDATE bots SET last_heartbeat = ? WHERE id = ?", (now_ms(), b["id"]))
         return results
 
+    def _try_data_recovery(self, b: dict[str, Any]) -> None:
+        """A bot stopped only because market data was stale resumes by itself once fresh data is back."""
+        if self._backoff.get(b["id"], 0) > time.monotonic():
+            return
+        try:
+            c = self.bots.market.get_candles(b["instrument_id"], b["timeframe"], limit=5)
+            fresh = len(c) > 0 and not c.quality.get("stale")
+        except OmosError:
+            fresh = False
+        if not fresh:
+            self._backoff[b["id"]] = time.monotonic() + min(300.0, max(self.tick_s, 0.0) * 6)
+            return
+        self.bots._set_flag(b["id"], "data_error", False)
+        self.bots.db.execute("UPDATE bots SET error_count = 0, last_error = NULL WHERE id = ?", (b["id"],))
+        self.bots._transition(b, "recovering", "market data is available again")
+        self.bots._transition(self.bots.get(b["id"]), "running", "resumed after a data outage")
+        self.bots.log(b["id"], "info", "market data is available again; resumed")
+        self._backoff.pop(b["id"], None)
+
     def _fail(self, b: dict[str, Any], msg: str) -> None:
+        if "market data is stale" in msg or "not enough data" in msg or "provider" in msg.lower():
+            self.bots._set_flag(b["id"], "data_error", True)
         count = b["error_count"] + 1
         self.bots.db.execute("UPDATE bots SET error_count = ?, last_error = ? WHERE id = ?", (count, msg[:500], b["id"]))
         self.bots.log(b["id"], "error", f"tick failed ({count}/{MAX_CONSECUTIVE_ERRORS}): {msg}")
@@ -418,25 +456,40 @@ class BotRunner:
 
     def _run_bot(self, b: dict[str, Any]) -> TickResult:
         halted, why = self.bots.risk.is_halted(b["account_id"])
+        ctx = self._context(b)
         if halted:
-            self.bots.pause(b["id"], actor="risk_engine", reason=f"paused: {why}")
-            return TickResult(b["id"], "paused", why)
+            pos = ctx.position(b["instrument_id"])
+            if not pos or abs(pos["qty"]) < 1e-12 or b["kind"] not in ("rule", "layered"):
+                for o in ctx.open_orders():  # no resting entry may fill while halted
+                    ctx.cancel(o["id"])
+                if b["kind"] == "layered" and b["runtime"].get("basket"):
+                    b["runtime"].pop("basket", None)
+                    self.bots.save_runtime(b["id"], b["runtime"])
+                self.bots.pause(b["id"], actor="risk_engine", reason=f"paused: {why}")
+                return TickResult(b["id"], "paused", why)
+            # an open position keeps its protective exits; nothing may add to it
+            for o in ctx.open_orders():
+                if o["side"] == ("buy" if pos["qty"] > 0 else "sell"):
+                    ctx.cancel(o["id"])
+            if b["runtime"].get("halt_note") != why:
+                self.bots.log(b["id"], "warning", f"trading halted ({why}): only managing the open position's exits")
+                b["runtime"]["halt_note"] = why
         cfg = b["config"]
         candles = self.bots.market.get_candles(b["instrument_id"], b["timeframe"], limit=cfg.get("lookback_bars", 300))
         if len(candles) < 20:
             raise OmosError(f"not enough data ({len(candles)} bars)")
-        if candles.status.value == "HISTORICAL" and candles.quality.get("stale"):
+        if candles.quality.get("stale"):
+            # never act on stale prices: no entries, no exits; after repeated failures the bot goes to 'error'
             raise OmosError(f"market data is stale: {candles.quality.get('stale_reason')}")
         # Work only on CLOSED bars; the forming bar is used for protective stops only.
         closed = candles if candles.last_closed else candles.slice(0, len(candles) - 1)
         last_price = float(candles.close[-1])
         self.bots.gateway.on_price(b["instrument_id"], last_price, candles.status.value)
-        ctx = self._context(b)
         runtime = b["runtime"]
         result = self._protective_exits(b, ctx, runtime, last_price)
-        if result:
+        if result or halted:
             self.bots.save_runtime(b["id"], runtime)
-            return result
+            return result or TickResult(b["id"], "halted", "exits only")
         if not len(closed):
             return TickResult(b["id"], "wait", "no closed bar yet")
         bar_ts = int(closed.ts[-1])
@@ -444,6 +497,8 @@ class BotRunner:
             return TickResult(b["id"], "idle", "no new closed bar")
         if b["kind"] == "rule":
             res = self._rule(b, ctx, runtime, closed, bar_ts)
+        elif b["kind"] == "layered":
+            res = self._layered_entry(b, ctx, runtime, closed, bar_ts)
         elif b["kind"] == "dca":
             res = self._dca(b, ctx, runtime, closed, bar_ts)
         else:
@@ -454,6 +509,8 @@ class BotRunner:
 
     # protective stops/targets checked every tick against the latest price
     def _protective_exits(self, b, ctx: TradingContext, runtime: dict[str, Any], price: float) -> TickResult | None:
+        if b["kind"] == "layered":
+            return self._layered_manage(b, ctx, runtime, price)
         if b["kind"] != "rule":
             return None
         pos = ctx.position(b["instrument_id"])
@@ -555,9 +612,9 @@ class BotRunner:
                 return TickResult(b["id"], "skip", "condition not met")
         invested = runtime.get("invested", 0.0)
         price = float(closed.close[-1])
-        amount = min(cfg["size_value"] if cfg["sizing"] == "fixed_cash" else cfg["size_value"] / 100 * ctx.equity(),
-                     cfg["max_invested"] - invested)
-        if amount <= 0:
+        installment = cfg["size_value"] if cfg["sizing"] == "fixed_cash" else cfg["size_value"] / 100 * ctx.equity()
+        amount = min(installment, cfg["max_invested"] - invested)
+        if amount <= installment * 0.05:  # what is left is fees/slippage headroom, not worth an order
             return TickResult(b["id"], "done", "max investment reached")
         # size with 0.5% headroom so spread/slippage on the fill cannot push spending past the cap
         r = ctx.submit(b["instrument_id"], "buy", amount / (price * 1.005), client_order_id=f"bot{b['id']}:{bar_ts}:dca",
@@ -604,6 +661,136 @@ class BotRunner:
             else:
                 self._report(b, "grid_rejected", r)
         return TickResult(b["id"], "grid", f"{placed} order(s) placed")
+
+    # -- layered entries ---------------------------------------------------------------------------------
+    def _layered_entry(self, b, ctx: TradingContext, runtime, closed, bar_ts: int) -> TickResult:
+        """On a new closed bar: plan and place a basket if flat, idle and every pre-condition holds."""
+        cfg = b["config"]
+        if runtime.get("basket"):
+            return TickResult(b["id"], "manage", "basket open")
+        if bar_ts < runtime.get("cooldown_until", 0):
+            return TickResult(b["id"], "cooldown", "waiting after the last basket")
+        pos = ctx.position(b["instrument_id"])
+        if pos and abs(pos["qty"]) > 1e-12:
+            return TickResult(b["id"], "skip", "a position is already open in this instrument")
+        tf_ms = parse_tf(b["timeframe"]).ms
+        age_bars = (self.clock() - bar_ts) / tf_ms - 1
+        if age_bars > cfg["stale_after_bars"]:
+            return TickResult(b["id"], "skip", f"newest closed bar is {age_bars:.0f} bars old: data too old to enter")
+        if cfg["min_volume"] and float(closed.volume[-1]) < cfg["min_volume"]:
+            return self._skip(b, runtime, bar_ts, f"volume {float(closed.volume[-1]):g} below {cfg['min_volume']:g}")
+        try:
+            q = self.bots.market.get_quote(b["instrument_id"])
+            if q.bid and q.ask and q.ask > q.bid > 0:
+                spread = (q.ask - q.bid) / ((q.ask + q.bid) / 2) * 100
+                if spread > cfg["max_spread_pct"]:
+                    return self._skip(b, runtime, bar_ts, f"spread {spread:.2f}% wider than {cfg['max_spread_pct']}%")
+        except OmosError:
+            pass  # no quote: the gateway's own price check still applies
+        if cfg["entry_condition"]:
+            v = evaluate_expression(cfg["entry_condition"], closed)
+            if not bool(v[-1]):
+                return TickResult(b["id"], "wait", "entry condition not met")
+        from omos.indicators.core import atr as atr_fn
+        atr_v = atr_fn(closed.high, closed.low, closed.close, cfg["atr_period"])[-1]
+        price = float(closed.close[-1])
+        lim = self.bots.risk.limits(b["account_id"])
+        from omos.risk.engine import MarketContext
+        ceiling = self.bots.risk.layer_ceiling(lim, MarketContext(price, closed.status.value,
+                                                                  atr=float(atr_v) if np.isfinite(atr_v) else None))
+        snap = self.bots.gateway.portfolio.snapshot(b["account_id"])
+        cap = min(snap.equity * lim.max_instrument_exposure_pct / 100, snap.equity * lim.max_total_exposure_pct / 100
+                  - snap.exposure(), snap.cash if lim.max_leverage <= 1.0 else float("inf")) * 0.98
+        p = layered.plan(cfg, price=price, atr=float(atr_v) if np.isfinite(atr_v) else None, equity=snap.equity,
+                         ceiling=ceiling, max_notional=max(cap, 0.0))
+        if not p.layers:
+            return self._skip(b, runtime, bar_ts, f"no basket: {p.why}")
+        side = "buy" if cfg["direction"] == "long" else "sell"
+        basket_id = f"bot{b['id']}:{bar_ts}"
+        r = ctx.submit_basket(b["instrument_id"], side, [{k: lyr[k] for k in ("type", "limit_price", "qty", "stop_loss")}
+                                                          for lyr in p.layers], basket_id=basket_id, reason="layered entry")
+        stats = runtime.setdefault("stats", {"baskets": 0, "rejected": 0, "take_profit": 0, "stop": 0, "expired": 0,
+                                             "trailing_stop": 0})
+        if not r["approved"] or r.get("aborted"):
+            stats["rejected"] += 1
+            reasons = (r.get("decision") or {}).get("reasons") or [r.get("aborted") or "rejected"]
+            self.bots.log(b["id"], "warning", f"basket of {len(p.layers)} rejected as a whole: " + "; ".join(reasons),
+                          {"basket_id": basket_id, "plan": p.to_dict()})
+            runtime["cooldown_until"] = bar_ts + cfg["cooldown_bars"] * tf_ms
+            return TickResult(b["id"], "basket_rejected", "; ".join(reasons)[:200])
+        stats["baskets"] += 1
+        sign = 1 if cfg["direction"] == "long" else -1
+        runtime["basket"] = {"id": basket_id, "orders": [o["id"] for o in r["orders"]], "stop": p.stop,
+                             "unit": p.unit, "opened_bar": bar_ts, "expires": bar_ts + cfg["expire_bars"] * tf_ms,
+                             "extreme": price, "sign": sign, "trailing": False, "exit_attempts": 0,
+                             "planned_layers": len(p.layers), "risk": p.risk}
+        self.bots.log(b["id"], "info", f"basket placed: {p.why}; stop {p.stop:g}; risk {p.risk:,.2f}",
+                      {"basket_id": basket_id, "plan": p.to_dict()})
+        return TickResult(b["id"], "basket_placed", p.why)
+
+    def _skip(self, b, runtime, bar_ts: int, why: str) -> TickResult:
+        if runtime.get("last_skip") != why:  # log each new reason once, not every bar
+            self.bots.log(b["id"], "info", f"no new basket: {why}")
+            runtime["last_skip"] = why
+        return TickResult(b["id"], "skip", why)
+
+    def _layered_manage(self, b, ctx: TradingContext, runtime, price: float) -> TickResult | None:
+        """Every tick while a basket is open: trailing stop, stop, take-profit, expiry, clean-up."""
+        bk = runtime.get("basket")
+        if not bk:
+            return None
+        cfg = b["config"]
+        orders = [ctx.order(i) for i in bk["orders"]]
+        open_orders = [o for o in orders if o and o["status"] in ("new", "accepted", "partially_filled")]
+        pos = ctx.position(b["instrument_id"])
+        qty = pos["qty"] if pos else 0.0
+        sign = bk["sign"]
+        tf_ms = parse_tf(b["timeframe"]).ms
+        if abs(qty) < 1e-12:
+            if not open_orders:
+                return self._close_basket(b, runtime, "closed", "no position and no open layer orders", tf_ms)
+            if self.clock() >= bk["expires"]:
+                for o in open_orders:
+                    ctx.cancel(o["id"])
+                return self._close_basket(b, runtime, "expired", "ladder expired unfilled", tf_ms)
+            return None
+        avg = pos["avg_price"]
+        bk["extreme"] = max(bk["extreme"], price) if sign > 0 else min(bk["extreme"], price)
+        unit = bk["unit"]
+        if cfg["trail_activate"] > 0 and (bk["extreme"] - avg) * sign >= cfg["trail_activate"] * unit:
+            trail = bk["extreme"] - sign * cfg["trail_distance"] * unit
+            if (trail - bk["stop"]) * sign > 0:
+                bk["stop"], bk["trailing"] = layered._round(trail), True
+        target = avg + sign * cfg["take_profit"] * unit
+        hit = None
+        if (price - bk["stop"]) * sign <= 0:
+            hit = "trailing_stop" if bk["trailing"] else "stop"
+        elif (price - target) * sign >= 0:
+            hit = "take_profit"
+        if not hit:
+            return None
+        for o in open_orders:  # no layer may fill after the exit
+            ctx.cancel(o["id"])
+        bk["exit_attempts"] += 1
+        r = ctx.submit(b["instrument_id"], "sell" if sign > 0 else "buy", abs(qty), reduce_only=True,
+                       client_order_id=f"{bk['id']}:exit{bk['exit_attempts']}", reason=f"basket {hit.replace('_', ' ')}")
+        self._report(b, f"basket_{hit}", r)
+        if r["order"]["status"] == "rejected":  # retried on the next tick, with back-off; repeated failure -> error
+            raise OmosError(f"basket exit ({hit}) was rejected: {r['order'].get('reason') or 'no reason given'}")
+        if r["order"]["status"] == "filled":
+            filled = sum(1 for o in orders if o and o["filled_qty"] > 0)
+            return self._close_basket(b, runtime, hit, f"{hit.replace('_', ' ')} at {r['order']['avg_fill_price']:g} "
+                                      f"after {filled} of {bk['planned_layers']} layer(s) filled", tf_ms)
+        return TickResult(b["id"], f"basket_{hit}", r["order"]["status"])
+
+    def _close_basket(self, b, runtime, outcome: str, why: str, tf_ms: int) -> TickResult:
+        bk = runtime.pop("basket")
+        stats = runtime.setdefault("stats", {})
+        stats[outcome] = stats.get(outcome, 0) + 1
+        runtime["cooldown_until"] = self.clock() + b["config"]["cooldown_bars"] * tf_ms
+        runtime.pop("last_skip", None)
+        self.bots.log(b["id"], "info", f"basket {bk['id']} {outcome}: {why}", {"basket_id": bk["id"]})
+        return TickResult(b["id"], f"basket_{outcome}", why)
 
     def _report(self, b, action: str, r: dict[str, Any]) -> None:
         o = r["order"]

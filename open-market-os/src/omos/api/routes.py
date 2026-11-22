@@ -696,6 +696,44 @@ def configure_bot(bid: int, request: Request, payload: dict[str, Any] = Body(...
     return H(request).bots.configure(bid, payload.get("config") or {}, actor=info.actor)
 
 
+@router.post("/bots/{bid}/simulate")
+def bot_simulate(bid: int, request: Request, payload: dict[str, Any] = Body(default={}), info=Depends(PAPER)):
+    """Stress-test the bot on synthetic scenarios in an isolated simulation (a background job)."""
+    from omos.bots.simulate import SCENARIOS, simulate
+
+    h = H(request)
+    b = h.bots.get(bid)
+    scenarios = payload.get("scenarios") or list(SCENARIOS)
+    bad = [s for s in scenarios if s not in SCENARIOS]
+    if bad:
+        raise ValidationError(f"unknown scenario(s): {', '.join(bad)}")
+    bars = int(payload.get("bars", 160))
+    if not 60 <= bars <= 600:
+        raise ValidationError("bars must be between 60 and 600")
+    equity = h.portfolio.snapshot(b["account_id"]).equity
+    limits = h.risk.limits(b["account_id"]).to_dict()
+
+    def run(job):
+        results = []
+        for i, sc in enumerate(scenarios):
+            job.check_cancel()
+            job.update(100 * i / len(scenarios), f"Scenario {i + 1} of {len(scenarios)}: {SCENARIOS[sc]}")
+            results.append(simulate(b, equity=equity, limits=limits, scenarios=[sc], bars=bars)["results"][0])
+        worst = min((r.get("worst_basket_loss_pct", 0) for r in results if "error" not in r), default=0)
+        summary = {"scenarios": len(results), "errors": sum(1 for r in results if "error" in r),
+                   "worst_basket_loss_pct": worst, "basket_risk_budget_pct": b["config"].get("basket_risk_pct"),
+                   "duplicate_orders": sum(r.get("duplicate_orders", 0) for r in results if "error" not in r)}
+        h.bots._set_flag(bid, "simulation", {"at": now_ms(), "summary": summary, "bars": bars})
+        h.bots.log(bid, "info", f"simulated on {len(results)} scenario(s); worst basket {worst}% of equity",
+                   {"summary": summary})
+        return {"status": "SIMULATED", "equity": equity, "bars_per_scenario": bars, "results": results,
+                "summary": summary,
+                "note": "Simulated prices, paper fills. The risk budget limits the loss when the stop fills at its "
+                        "price; gaps, fees and slippage can make a real loss larger (see the gap scenario)."}
+
+    return h.jobs.start(f"simulate:{bid}", f"Simulate {b['name']}", run).to_dict()
+
+
 @router.post("/bots/{bid}/{action}")
 def bot_action(bid: int, action: str, request: Request, require_paper: int = 0,
                payload: dict[str, Any] = Body(default={}), info=Depends(PAPER)):

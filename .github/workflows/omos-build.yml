@@ -225,7 +225,10 @@ jobs:
       - run: echo "OMOS_VERSION=$(python -c 'import omos; print(omos.__version__)')" >> "$GITHUB_ENV"
       - run: bash scripts/build_web.sh
       - name: Android SDK packages
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+        run: |
+          set +o pipefail   # 'yes' is cut off by a closed pipe when sdkmanager finishes
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          test -d "$ANDROID_HOME/platforms/android-35" && test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
       - name: Signing key (created once by this workflow, kept in a private draft release)
         env:
           GH_TOKEN: ${{ github.token }}

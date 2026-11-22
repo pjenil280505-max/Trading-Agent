@@ -132,7 +132,10 @@ def test_layers_limited_and_volatility_cap(st):
         assert st.gateway.submit(order(st, qty=1, stop_loss=95), actor="ui")["order"]["status"] == "filled"
     third = st.gateway.submit(order(st, qty=1, stop_loss=95), actor="ui")
     assert third["order"]["status"] == "rejected" and any("layer" in x for x in third["decision"]["reasons"])
-    # volatility: ATR 8% of price lowers the cap to one layer
+    # volatility: ATR 8% of price lowers the ceiling to high_volatility_max_layers (here 1)
+    st.risk.set_limits(st.account["id"], {"max_layers_per_position": 2, "high_volatility_max_layers": 1,
+                                          "max_instrument_exposure_pct": 100, "max_order_value_pct": 100,
+                                          "max_risk_per_trade_pct": 50, "max_position_risk_pct": 100}, actor="ui")
     eng = RiskEngine(st.db)
     snap = AccountSnapshot(st.account["id"], "paper", 10_000, 9_000, {"TEST:ABC": PositionView(1, 100, 1)}, {"TEST:ABC": 100})
     d = eng.check(order(st, qty=1, stop_loss=95), snap, MarketContext(100, "REALTIME", atr=8.0))

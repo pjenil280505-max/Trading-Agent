@@ -27,6 +27,7 @@ class PaperConfig:
     commission_pct: float = 0.1
     slippage_bps: float = 5.0
     default_spread_bps: float = 4.0
+    max_fill_fraction: float = 1.0   # < 1 simulates thin markets: resting orders fill in parts, per price update
 
 
 class PaperBroker:
@@ -69,7 +70,9 @@ class PaperBroker:
             fill_px = self._trigger_price(o, price)
             if fill_px is not None:
                 remaining = o["qty"] - o["filled_qty"]
-                changed.append(self._fill(o, remaining, fill_px))
+                part = remaining if self.cfg.max_fill_fraction >= 1 else max(min(remaining, o["qty"] * self.cfg.max_fill_fraction),
+                                                                            min(remaining, o["qty"] * 1e-6))
+                changed.append(self._fill(o, part, fill_px))
         return changed
 
     # -- internals -----------------------------------------------------------------------

@@ -98,12 +98,91 @@ class ExecutionGateway:
                                               "price_status_at_submit": mkt.price_status}), ts, ts))
             order = self.db.query_one("SELECT * FROM orders WHERE id = ?", (cur.lastrowid,))
             assert order is not None
-            order = broker.place(order, mkt.price, bid=quote.get("bid"), ask=quote.get("ask"))
+            try:
+                order = broker.place(order, mkt.price, bid=quote.get("bid"), ask=quote.get("ask"))
+            except Exception as exc:  # broker unreachable or refused: never leave the order looking 'new'
+                log.error("broker failed to place order %s: %s", order["id"], exc)
+                self.db.execute("UPDATE orders SET status = 'rejected', reason = ?, updated_at = ? WHERE id = ? "
+                                "AND status = 'new'", (f"broker error: {exc}"[:500], now_ms(), order["id"]))
+                order = self.db.query_one("SELECT * FROM orders WHERE id = ?", (order["id"],))
             self.db.audit(actor, "order.submit", str(order["id"]), {"client_order_id": req.client_order_id,
                                                                    "status": order["status"], "origin": req.origin})
         self._after_trade(req.account_id)
         self.publish("order", {"order": order, "account_id": req.account_id})
         return {"order": order, "duplicate": False, "decision": decision.to_dict()}
+
+    def submit_basket(self, reqs: list[OrderRequest], *, actor: str, basket_id: str) -> dict[str, Any]:
+        """Layered entry: every layer is checked together (``RiskEngine.check_basket``) and placed only if the
+        whole basket passes. A rejected basket places nothing; each layer is recorded as rejected with the
+        same decision. Replaying the same basket id (after a restart) returns the existing orders."""
+        if not reqs:
+            raise ValidationError("a basket needs at least one order")
+        if not 1 <= len(basket_id) <= 80:
+            raise ValidationError("basket id must be 1-80 characters")
+        for i, r in enumerate(reqs):
+            r.client_order_id = f"{basket_id}:L{i}"
+            r.meta = {**r.meta, "basket_id": basket_id, "layer": i}
+            r.validate()
+        account = self.portfolio.account(reqs[0].account_id)
+        with self._lock:
+            ids = [r.client_order_id for r in reqs]
+            existing = self.db.query(
+                f"SELECT * FROM orders WHERE client_order_id IN ({','.join('?' * len(ids))}) ORDER BY id", ids)
+            if existing:
+                return {"orders": existing, "duplicate": True, "approved": existing[0]["status"] != "rejected",
+                        "decision": None, "basket_id": basket_id}
+            try:
+                broker = self._broker_for(account)
+                mkt, quote = self._market(reqs[0].instrument_id)
+                snapshot = self.portfolio.snapshot(reqs[0].account_id)
+                decision = self.risk.check_basket(reqs, snapshot, mkt, live_enabled=self.live_enabled())
+            except RiskRejected as exc:
+                decision = RiskDecision(False, new_id("rd_"), [exc.message], [], 0.0, 0.0)
+            except Exception as exc:  # no price -> no basket
+                decision = RiskDecision(False, new_id("rd_"), [f"no market price available: {exc}"], [], 0.0, 0.0)
+            if not decision.approved:
+                rows = [self._reject(r, account, decision, actor)["order"] for r in reqs]
+                return {"orders": rows, "duplicate": False, "approved": False, "decision": decision.to_dict(),
+                        "basket_id": basket_id}
+            self.risk.log_event(reqs[0].account_id, "approved", reqs[0].origin, "pre_trade_basket",
+                                f"basket of {len(reqs)} approved", {"basket_id": basket_id,
+                                                                    "orders": [r.to_dict() for r in reqs]},
+                                decision.decision_id)
+            ts = now_ms()
+            rows = []
+            for r in reqs:
+                cur = self.db.execute(
+                    "INSERT INTO orders(client_order_id, account_id, instrument_id, side, type, qty, limit_price, stop_price, "
+                    "tif, status, origin, bot_id, reason, risk_decision_id, meta, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (r.client_order_id, r.account_id, r.instrument_id, r.side.value, r.type.value, r.qty, r.limit_price,
+                     r.stop_price, r.tif, OrderStatus.NEW.value, r.origin, r.bot_id, r.reason, decision.decision_id,
+                     dumps({**r.meta, "stop_loss": r.stop_loss, "take_profit": r.take_profit,
+                            "price_status_at_submit": mkt.price_status}), ts, ts))
+                rows.append(self.db.query_one("SELECT * FROM orders WHERE id = ?", (cur.lastrowid,)))
+            placed: list[dict[str, Any]] = []
+            for i, row in enumerate(rows):
+                try:
+                    placed.append(broker.place(row, mkt.price, bid=quote.get("bid"), ask=quote.get("ask")))
+                except Exception as exc:  # a broker failure mid-basket: take back what was placed
+                    log.error("basket %s aborted at layer %s: %s", basket_id, i, exc)
+                    for p in placed:
+                        try:
+                            broker.cancel(p, reason="basket aborted")
+                        except Exception:  # noqa: BLE001 - reconciliation reports anything left over
+                            log.exception("could not cancel layer of aborted basket %s", basket_id)
+                    for rest in rows[i:]:
+                        self.db.execute("UPDATE orders SET status = 'rejected', reason = ?, updated_at = ? WHERE id = ?",
+                                        (f"basket aborted: {exc}"[:500], now_ms(), rest["id"]))
+                    out = self.db.query(f"SELECT * FROM orders WHERE client_order_id IN ({','.join('?' * len(ids))})", ids)
+                    return {"orders": out, "duplicate": False, "approved": True, "aborted": str(exc),
+                            "decision": decision.to_dict(), "basket_id": basket_id}
+            self.db.audit(actor, "basket.submit", basket_id, {"layers": len(reqs), "origin": reqs[0].origin})
+        self._after_trade(reqs[0].account_id)
+        for o in placed:
+            self.publish("order", {"order": o, "account_id": reqs[0].account_id})
+        return {"orders": placed, "duplicate": False, "approved": True, "decision": decision.to_dict(),
+                "basket_id": basket_id}
 
     def _reject(self, req: OrderRequest, account: dict[str, Any], decision: RiskDecision, actor: str) -> dict[str, Any]:
         ts = now_ms()
@@ -233,6 +312,20 @@ class TradingContext:
                            client_order_id=client_order_id, origin=self.origin, bot_id=self.bot_id, reason=reason,
                            stop_loss=stop_loss, take_profit=take_profit, reduce_only=reduce_only)
         return self._gw.submit(req, actor=self.origin)
+
+    def submit_basket(self, instrument_id: str, side: str, layers: list[dict[str, Any]], *, basket_id: str,
+                      reason: str = "") -> dict[str, Any]:
+        """layers: [{qty, type, limit_price?, stop_loss?, take_profit?}] - checked and placed all-or-nothing."""
+        reqs = [OrderRequest(account_id=self.account_id, instrument_id=instrument_id, side=Side(side),
+                             qty=float(lyr["qty"]), type=OrderType(lyr.get("type", "limit")),
+                             limit_price=lyr.get("limit_price"), stop_loss=lyr.get("stop_loss"),
+                             take_profit=lyr.get("take_profit"), origin=self.origin, bot_id=self.bot_id,
+                             reason=f"{reason} layer {i + 1}/{len(layers)}".strip())
+                for i, lyr in enumerate(layers)]
+        return self._gw.submit_basket(reqs, actor=self.origin, basket_id=basket_id)
+
+    def order(self, order_id: int) -> dict[str, Any] | None:
+        return self._gw.db.query_one("SELECT * FROM orders WHERE id = ? AND account_id = ?", (order_id, self.account_id))
 
     def position(self, instrument_id: str) -> dict[str, Any] | None:
         for p in self._gw.portfolio.positions(self.account_id):

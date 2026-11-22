@@ -36,8 +36,12 @@ class RiskLimits:
     max_orders_per_minute: int = 20
     max_trades_per_day: int = 100
     max_simultaneous_bots: int = 5
-    max_layers_per_position: int = 3           # operational limit; volatility can lower it (below)
-    high_volatility_atr_pct: float = 5.0       # if ATR% of price exceeds this, only one layer is allowed
+    # Layering has no fixed strategy limit: layered bots size their ladders from a risk budget and the
+    # current volatility. These two are safety ceilings only, never targets.
+    max_layers_per_position: int = 12          # safety ceiling on layers in one position
+    high_volatility_atr_pct: float = 5.0       # above this ATR% of price ...
+    high_volatility_max_layers: int = 4        # ... the ceiling drops to this
+    max_layer_distance_pct: float = 30.0       # deepest layer of a basket, % from the last price
     max_price_deviation_pct: float = 5.0       # limit/stop price sanity band around the last price
     allow_short: bool = False
     trading_hours_only: bool = False
@@ -57,7 +61,7 @@ class RiskLimits:
     def validate(self) -> None:
         pct = ["max_risk_per_trade_pct", "max_position_risk_pct", "assumed_stop_pct", "max_daily_loss_pct",
                "max_weekly_loss_pct", "max_drawdown_pct", "max_order_value_pct", "max_price_deviation_pct",
-               "high_volatility_atr_pct"]
+               "high_volatility_atr_pct", "max_layer_distance_pct"]
         for k in pct:
             v = float(getattr(self, k))
             if not 0 < v <= 100:
@@ -68,7 +72,7 @@ class RiskLimits:
         if not 0 < float(self.max_leverage) <= 100:
             raise ValidationError("max_leverage must be in (0, 100]")
         for k in ("max_open_positions", "max_orders_per_minute", "max_trades_per_day", "max_simultaneous_bots",
-                  "max_layers_per_position"):
+                  "max_layers_per_position", "high_volatility_max_layers"):
             if int(getattr(self, k)) < 1:
                 raise ValidationError(f"{k} must be at least 1")
         if float(self.max_order_qty) < 0:
@@ -175,9 +179,11 @@ class RiskEngine:
 
         halted, why = self.is_halted(acct.account_id)
         if halted:
-            # A person may still reduce/close risk while halted; automation may not trade at all.
-            rule("halt", reduces and is_human, f"trading halted: {why}" + ("" if reduces and is_human else
-                 " (only manual reduce/close orders are allowed)"))
+            # While halted nobody may ADD risk. A person may reduce or close; automation only through reduce-only
+            # orders (a bot's protective stop must still work after a circuit breaker trips).
+            may = reduces and (is_human or req.reduce_only)
+            rule("halt", may, f"trading halted: {why}" + ("" if may else
+                 " (only orders that reduce or close a position are allowed)"))
         if acct.kind == "live":
             rule("live_enabled", live_enabled, "live trading is disabled (Settings > Trading > Live trading)")
         if req.reduce_only and not reduces:
@@ -243,11 +249,10 @@ class RiskEngine:
                 rule("max_open_positions", open_count < lim.max_open_positions,
                      f"{open_count} positions open (limit {lim.max_open_positions})")
             else:
-                allowed_layers = lim.max_layers_per_position
-                if mkt.atr is not None and price > 0 and mkt.atr / price * 100 > lim.high_volatility_atr_pct:
-                    allowed_layers = 1
+                allowed_layers = self.layer_ceiling(lim, mkt)
+                if allowed_layers < lim.max_layers_per_position:
                     checks.append({"rule": "volatility_layer_cap", "passed": True,
-                                   "message": f"high volatility: layering limited to 1 (ATR {mkt.atr / price * 100:.1f}%)"})
+                                   "message": f"high volatility: layer ceiling {allowed_layers} (ATR {mkt.atr / price * 100:.1f}%)"})
                 rule("max_layers", pos.layers < allowed_layers,
                      f"position already has {pos.layers} layer(s) (limit {allowed_layers})")
 
@@ -290,6 +295,143 @@ class RiskEngine:
             rule("max_bots", active_bots < lim.max_simultaneous_bots,
                  f"{active_bots} bots running (limit {lim.max_simultaneous_bots})")
         return self._decide(checks, reasons, notional, risk_amount)
+
+    @staticmethod
+    def layer_ceiling(lim: RiskLimits, mkt: MarketContext) -> int:
+        """Safety ceiling on layers in one position right now (lower when volatility is high)."""
+        if mkt.atr is not None and mkt.price > 0 and mkt.atr / mkt.price * 100 > lim.high_volatility_atr_pct:
+            return min(lim.max_layers_per_position, lim.high_volatility_max_layers)
+        return lim.max_layers_per_position
+
+    def check_basket(self, reqs: list[OrderRequest], acct: AccountSnapshot, mkt: MarketContext, *,
+                     live_enabled: bool = False) -> RiskDecision:
+        """All layers of a layered entry, judged together as if every one of them fills.
+
+        The basket is approved only if the WHOLE of it fits every limit; otherwise nothing is placed.
+        Single orders are judged by ``check``; a basket must never get through as separate orders that
+        each look small.
+        """
+        lim = self.limits(acct.account_id)
+        checks: list[dict[str, Any]] = []
+        reasons: list[str] = []
+
+        def rule(name: str, ok: bool, msg: str, **detail: Any) -> None:
+            checks.append({"rule": name, "passed": ok, "message": msg, **detail})
+            if not ok:
+                reasons.append(msg)
+
+        if not reqs:
+            rule("basket_empty", False, "the basket has no orders")
+            return self._decide(checks, reasons, 0.0, 0.0)
+        r0 = reqs[0]
+        if len({r.instrument_id for r in reqs}) != 1 or len({r.side for r in reqs}) != 1 or \
+                len({r.account_id for r in reqs}) != 1:
+            rule("basket_shape", False, "a basket adds to one position, in one direction, in one account")
+            return self._decide(checks, reasons, 0.0, 0.0)
+        if any(r.reduce_only for r in reqs):
+            rule("basket_entries_only", False, "a basket may only contain entries, not reduce-only orders")
+        side = r0.side
+        halted, why = self.is_halted(acct.account_id)
+        if halted:
+            rule("halt", False, f"trading halted: {why}")
+        if acct.kind == "live":
+            rule("live_enabled", live_enabled, "live trading is disabled (Settings > Trading > Live trading)")
+        if lim.allowed_instruments and r0.instrument_id not in lim.allowed_instruments:
+            rule("allowed_instruments", False, f"{r0.instrument_id} is not on the allowed-instruments list")
+        if r0.instrument_id in lim.blocked_instruments:
+            rule("blocked_instruments", False, f"{r0.instrument_id} is blocked")
+        price = mkt.price
+        if not (isinstance(price, int | float) and math.isfinite(price) and price > 0):
+            rule("price_available", False, "no valid market price to check this basket against")
+            return self._decide(checks, reasons, 0.0, 0.0)
+        if mkt.price_status in ("SIMULATED",) and acct.kind == "live":
+            rule("price_real", False, "a live basket cannot be validated against simulated prices")
+        if lim.trading_hours_only and not mkt.session_open:
+            rule("session_open", False, "market session is closed")
+        equity = acct.equity
+        if equity <= 0:
+            rule("equity_positive", False, "account equity is zero or negative")
+            return self._decide(checks, reasons, 0.0, 0.0)
+
+        pos = acct.positions.get(r0.instrument_id, PositionView(0.0, 0.0, 0))
+        if pos.qty != 0 and (pos.qty > 0) != (side == Side.BUY):
+            rule("basket_direction", False, "a basket cannot be placed against the open position")
+        notional = 0.0
+        basket_risk = 0.0
+        for i, r in enumerate(reqs):
+            px = float(r.limit_price if r.type in (OrderType.LIMIT, OrderType.STOP_LIMIT) else
+                       r.stop_price if r.type == OrderType.STOP else price)
+            dist = abs(px / price - 1) * 100
+            if dist > lim.max_layer_distance_pct:
+                rule("layer_distance", False, f"layer {i + 1} at {px:g} is {dist:.1f}% from the last price "
+                     f"(limit {lim.max_layer_distance_pct}%)")
+            value = r.qty * px
+            notional += value
+            if lim.max_order_qty and r.qty > lim.max_order_qty:
+                rule("max_order_qty", False, f"layer {i + 1}: quantity {r.qty:g} exceeds the cap {lim.max_order_qty:g}")
+            if value / equity * 100 > lim.max_order_value_pct:
+                rule("max_order_value", False, f"layer {i + 1} is {value / equity * 100:.1f}% of equity "
+                     f"(limit {lim.max_order_value_pct}%)")
+            if r.stop_loss is None:
+                if lim.require_stop_loss:
+                    rule("stop_required", False, f"layer {i + 1} has no stop-loss")
+                stop_dist = px * lim.assumed_stop_pct / 100
+            else:
+                if (side == Side.BUY and r.stop_loss >= px) or (side == Side.SELL and r.stop_loss <= px):
+                    rule("stop_side", False, f"layer {i + 1}: stop-loss is on the wrong side of its entry price")
+                stop_dist = abs(px - r.stop_loss)
+            layer_risk = r.qty * stop_dist
+            basket_risk += layer_risk
+            if layer_risk / equity * 100 > lim.max_risk_per_trade_pct + 1e-9:
+                rule("risk_per_trade", False, f"layer {i + 1} risks {layer_risk / equity * 100:.2f}% of equity "
+                     f"(limit {lim.max_risk_per_trade_pct}%)")
+
+        signed_total = sum(r.qty for r in reqs) * side.sign
+        new_qty = pos.qty + signed_total
+        if new_qty < -1e-12 and not lim.allow_short:
+            rule("no_short", False, "this basket would open a short position, and shorting is disabled")
+        gross_after = acct.exposure() - abs(pos.qty) * price + abs(new_qty) * price
+        inst_after = abs(new_qty) * price
+        rule("total_exposure", gross_after / equity * 100 <= lim.max_total_exposure_pct,
+             f"if every layer fills, total exposure is {gross_after / equity * 100:.1f}% of equity "
+             f"(limit {lim.max_total_exposure_pct}%)")
+        rule("instrument_exposure", inst_after / equity * 100 <= lim.max_instrument_exposure_pct,
+             f"if every layer fills, {r0.instrument_id} exposure is {inst_after / equity * 100:.1f}% of equity "
+             f"(limit {lim.max_instrument_exposure_pct}%)")
+        rule("leverage", gross_after / equity <= lim.max_leverage + 1e-9,
+             f"if every layer fills, leverage is {gross_after / equity:.2f}x (limit {lim.max_leverage}x)")
+        if lim.max_leverage <= 1.0 and side == Side.BUY:
+            need = notional * 1.005
+            rule("cash", need <= acct.cash + 1e-6, f"the whole basket needs about {need:,.2f} but {acct.cash:,.2f} cash is free")
+        if pos.qty == 0:
+            open_count = sum(1 for p in acct.positions.values() if abs(p.qty) > 1e-12)
+            rule("max_open_positions", open_count < lim.max_open_positions,
+                 f"{open_count} positions open (limit {lim.max_open_positions})")
+        ceiling = self.layer_ceiling(lim, mkt)
+        total_layers = pos.layers + len(reqs)
+        rule("layer_ceiling", total_layers <= ceiling,
+             f"{total_layers} layers in one position exceeds the safety ceiling of {ceiling}"
+             + (" (lowered for high volatility)" if ceiling < lim.max_layers_per_position else ""))
+        existing_risk = 0.0
+        if pos.qty != 0:
+            stops = [r.stop_loss for r in reqs if r.stop_loss is not None]
+            existing_risk = abs(pos.qty) * (abs(pos.avg_price - min(stops) if side == Side.BUY else pos.avg_price - max(stops))
+                                            if stops else pos.avg_price * lim.assumed_stop_pct / 100)
+        agg = (existing_risk + basket_risk) / equity * 100
+        rule("basket_risk", agg <= lim.max_position_risk_pct + 1e-9,
+             f"if every layer fills and the stop is hit, the loss is {agg:.2f}% of equity "
+             f"(limit {lim.max_position_risk_pct}%)", risk_pct=agg)
+        since = now_ms() - 60_000
+        recent = self.db.scalar("SELECT COUNT(*) FROM orders WHERE account_id = ? AND created_at >= ?",
+                                (acct.account_id, since)) or 0
+        rule("orders_per_minute", recent + len(reqs) <= lim.max_orders_per_minute,
+             f"{recent} orders in the last minute plus {len(reqs)} in this basket (limit {lim.max_orders_per_minute})")
+        day_start = now_ms() - (now_ms() % 86_400_000)
+        trades_today = self.db.scalar("SELECT COUNT(*) FROM fills WHERE account_id = ? AND ts >= ?",
+                                      (acct.account_id, day_start)) or 0
+        rule("trades_per_day", trades_today + len(reqs) <= lim.max_trades_per_day,
+             f"{trades_today} fills today plus up to {len(reqs)} from this basket (limit {lim.max_trades_per_day})")
+        return self._decide(checks, reasons, notional, basket_risk)
 
     @staticmethod
     def _decide(checks, reasons, notional, risk_amount) -> RiskDecision:
