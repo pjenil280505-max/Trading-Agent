@@ -40,6 +40,7 @@ function useSettings() {
 function General() {
   const pr = useStore(prefs)
   const { s, save } = useSettings()
+  const dev = useLoad(() => get('/device'))
   const [poll, setPoll] = useState<number | null>(null)
   return (
     <Card title="General">
@@ -51,8 +52,8 @@ function General() {
       </div>
       <ErrorBox error={s.error} />
       {s.data && <div class="row" style="margin-top:10px">
-        <Field label="Live price polling interval (seconds, 2–3600)" hint="lower = fresher prices, more requests to free APIs">
-          <div class="row"><input type="number" min={2} max={3600} style="width:90px" value={poll ?? s.data['data.poll_seconds'] ?? 5} onInput={(e) => setPoll(Number((e.target as HTMLInputElement).value))} />
+        <Field label="Live price polling interval (seconds, 2–3600)" hint={`lower = fresher prices, more requests to free APIs${s.data['data.poll_seconds'] == null && dev.data ? ` · default for this computer (${dev.data.profile.tier} tier): ${dev.data.profile.poll_seconds} s` : ''}`}>
+          <div class="row"><input type="number" min={2} max={3600} style="width:90px" value={poll ?? s.data['data.poll_seconds'] ?? dev.data?.profile?.poll_seconds ?? ''} onInput={(e) => setPoll(Number((e.target as HTMLInputElement).value))} />
             <Btn sm onClick={() => poll !== null && save({ 'data.poll_seconds': poll })}>Save</Btn></div></Field>
         <label class="row small"><input type="checkbox" checked={s.data['notify.desktop'] ?? false} onChange={(e) => save({ 'notify.desktop': (e.target as HTMLInputElement).checked })} /> OS desktop notifications on the host computer</label>
       </div>}
