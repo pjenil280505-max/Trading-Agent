@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import re
+import time
 from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
@@ -65,15 +66,20 @@ def web_dist() -> Path | None:
 class Guard(BaseHTTPMiddleware):
     """Host-header allow-list (DNS-rebinding defence), per-client rate limit, security headers."""
 
-    def __init__(self, app, *, allowed_hosts: set[str], loopback_only: bool):
+    def __init__(self, app, *, allowed_hosts: set[str], loopback_only: bool, refresh=None):
         super().__init__(app)
         self.allowed = allowed_hosts
         self.loopback_only = loopback_only
+        self.refresh = refresh   # re-reads this machine's addresses (e.g. after a DHCP change)
+        self.refreshed_at = 0.0
         self.buckets: dict[str, TokenBucket] = {}
 
     async def dispatch(self, request: Request, call_next):
         host_header = (request.headers.get("host") or "").lower()
         hostname = host_header.rsplit(":", 1)[0] if not host_header.startswith("[") else host_header.split("]")[0] + "]"
+        if hostname not in self.allowed and self.refresh and time.monotonic() - self.refreshed_at > 30:
+            self.refreshed_at = time.monotonic()
+            self.allowed = self.allowed | set(self.refresh())
         if hostname not in self.allowed:
             return JSONResponse({"error": "bad_host", "message": "request Host header is not allowed"}, status_code=421)
         ip = client_ip(request)
@@ -90,7 +96,9 @@ class Guard(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
-        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        if request.url.scheme == "https" or hostname in ("127.0.0.1", "localhost", "[::1]"):
+            # browsers ignore (and log an error about) COOP on plain-HTTP LAN origins
+            response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
@@ -116,7 +124,8 @@ def create_app(host, *, testing: bool = False) -> FastAPI:
     allowed = set(host.cfg.allowed_host_headers())
     if testing:
         allowed.add("testserver")
-    app.add_middleware(Guard, allowed_hosts=allowed, loopback_only=not host.cfg.allow_remote and not testing)
+    app.add_middleware(Guard, allowed_hosts=allowed, loopback_only=not host.cfg.allow_remote and not testing,
+                       refresh=host.cfg.allowed_host_headers if host.cfg.allow_remote else None)
 
     @app.exception_handler(OmosError)
     async def omos_error(request: Request, exc: OmosError):

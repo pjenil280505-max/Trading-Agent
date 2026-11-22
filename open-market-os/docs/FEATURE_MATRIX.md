@@ -256,6 +256,7 @@ release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 | Item | State | Evidence / notes |
 |---|---|---|
 | Pairing codes with permission presets, per-device tokens, revoke | VERIFIED | I, E |
+| Phones/tablets reaching the host over the LAN (`--allow-remote`) | TESTED | E (`OMOS_E2E_LAN=1`): sign-in by code over the LAN address, limited scopes; live WebSocket over LAN checked with a raw client only (sandbox limitation). Fixed in this release: LAN requests were rejected with 421 |
 | Bottom navigation, single-column charts on phones | TESTED | E (emulated phone) |
 | Device profile (CPU, RAM, disk, battery) adapting chart history, polling, AI model hint | IMPLEMENTED | Shown in System status |
 | GPU/VRAM/thermal-aware tuning | NOT STARTED | Only detects whether `nvidia-smi` exists |

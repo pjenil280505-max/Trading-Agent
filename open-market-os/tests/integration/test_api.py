@@ -364,3 +364,23 @@ def test_scheduled_screener_runs_and_notifies_only_new_matches(env):
     host._automation()                       # due again, same match: no repeat notification
     assert len(screener_notes()) == 1
     assert len(host.db.query("SELECT id FROM screener_runs WHERE screener_id = ?", (sid,))) == 2
+
+
+def test_remote_access_accepts_this_machines_own_addresses_only(tmp_path, monkeypatch):
+    """Regression: with --allow-remote, phones addressing the PC by its LAN IP got HTTP 421."""
+    from omos import config
+
+    monkeypatch.setenv("OMOS_DISABLE_KEYRING", "1")
+    monkeypatch.setenv("OMOS_VAULT_PASSPHRASE", "test vault passphrase")
+    monkeypatch.setattr(config, "local_host_names", lambda: {"192.168.1.50", "[fe80::1]", "mypc", "mypc.local"})
+    host = Host(HostConfig(data_dir=str(tmp_path / "r"), host="0.0.0.0", allow_remote=True), start_loops=False,
+                providers={"TEST": ControlledProvider()})
+    c = TestClient(create_app(host))
+    for ok in ("192.168.1.50:8765", "mypc.local:8765", "[fe80::1]:8765", "127.0.0.1:8765"):
+        assert c.get("/api/health", headers={"Host": ok}).status_code == 200, ok
+    for bad in ("evil.example.com", "192.168.1.50.evil.com", "mypc.evil.com"):
+        assert c.get("/api/health", headers={"Host": bad}).status_code == 421, bad
+    local = TestClient(create_app(Host(HostConfig(data_dir=str(tmp_path / "l")), start_loops=False,
+                                       providers={"TEST": ControlledProvider()})))
+    assert local.get("/api/health", headers={"Host": "192.168.1.50:8765"}).status_code == 421  # remote off
+    host.db.close()

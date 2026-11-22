@@ -80,10 +80,35 @@ class HostConfig:
     def allowed_host_headers(self) -> set[str]:
         hosts = {"127.0.0.1", "localhost", "[::1]"}
         if self.allow_remote:
-            hosts.update(self.extra_allowed_hosts)
+            hosts.update(h.lower() for h in self.extra_allowed_hosts)
+            # Devices on the LAN address this computer by its own IP or name. DNS-rebinding attacks need
+            # an attacker-controlled hostname, so this machine's own addresses are safe to accept.
+            hosts.update(local_host_names())
             if self.host not in ("0.0.0.0", "::"):
-                hosts.add(self.host)
+                hosts.add(self.host.lower())
         return hosts
+
+
+def local_host_names() -> set[str]:
+    """This machine's interface addresses (IPv6 in [brackets], as in Host headers) and hostname."""
+    import socket
+
+    import psutil
+
+    out: set[str] = set()
+    try:
+        for addrs in psutil.net_if_addrs().values():
+            for a in addrs:
+                if a.family == socket.AF_INET:
+                    out.add(a.address)
+                elif a.family == socket.AF_INET6:
+                    out.add(f"[{a.address.split('%')[0].lower()}]")
+    except OSError:
+        pass
+    name = socket.gethostname().lower()
+    if name:
+        out.update({name, f"{name}.local"})
+    return out
 
 
 def config_file(data_dir: Path | None = None) -> Path:

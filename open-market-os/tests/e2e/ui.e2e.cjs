@@ -354,6 +354,41 @@ function rawRequest(method, urlPath, headers = {}) {
     await ctx.close()
   })
 
+  if (process.env.OMOS_E2E_LAN_IP) await test('phone pairing over the LAN with a one-time code and limited permissions', async (setPage) => {
+    const { ctx: adminCtx, page: admin } = await signedInPage()
+    await go(admin, '/settings')
+    await admin.getByRole('tab', { name: 'Devices & access' }).click()
+    await admin.getByRole('button', { name: 'Create one-time code' }).click()
+    const code = (await admin.locator('.alertbox.ok .mono').textContent()).trim()
+    // a separate browser without any HTTP proxy, like a real phone on the LAN (CI/dev sandboxes often
+    // route non-local traffic through a proxy that cannot reach LAN addresses)
+    const lanBrowser = await chromium.launch({ args: ['--no-proxy-server'] })
+    const phoneCtx = await lanBrowser.newContext({ ...devices['iPhone 13'] })
+    const phone = await phoneCtx.newPage()
+    setPage(phone)
+    const problems = watch(phone)
+    const lan = BASE.replace('127.0.0.1', process.env.OMOS_E2E_LAN_IP)
+    await phone.goto(lan)
+    await phone.getByPlaceholder('e.g. 7K9MXQ2P').fill(code)
+    await phone.getByRole('button', { name: 'Sign in' }).click()
+    await phone.waitForSelector('.shell', { timeout: 20000 })
+    const scopes = await phone.evaluate(async () => (await (await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${localStorage.getItem('omos.token')}` } })).json()).scopes)
+    assert(JSON.stringify(scopes) === JSON.stringify(['read', 'trade:paper']), `default phone preset should be read + paper trading, got ${scopes}`)
+    await go(phone, '/settings')
+    await phone.locator('.alertbox.warn', { hasText: 'lacks the admin permission' }).waitFor()
+    const reuse = await (await lanBrowser.newContext()).newPage()
+    await reuse.goto(lan)
+    await reuse.getByPlaceholder('e.g. 7K9MXQ2P').fill(code)
+    await reuse.getByRole('button', { name: 'Sign in' }).click()
+    await reuse.locator('.alertbox.error').waitFor()           // the code works once
+    // In some sandboxes Chromium's WebSocket to the machine's own LAN address is answered with 502 by the
+    // network layer (a raw WebSocket client gets 101 + "hello"; see docs/DEVELOPMENT_STATUS.md). Only that
+    // exact message is tolerated here; the live channel itself is covered by the alerts test on localhost.
+    const real = problems.filter((m) => !/WebSocket connection to 'ws:\/\/[^']+\/api\/ws' failed: .*Unexpected response code: 502/.test(m))
+    assert(real.length === 0, `problems: ${real.join(' | ')}`)
+    await phoneCtx.close(); await adminCtx.close(); await lanBrowser.close()
+  })
+
   await test('security: API needs a token, bad tokens are refused, headers set, foreign Host refused', async (setPage) => {
     const ctx = await browser.newContext()
     const page = await ctx.newPage()

@@ -18,7 +18,7 @@ in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) and [FEATURE_MATRIX.md](FEATURE_MATRIX.md)
 | 6 / 7 Indicators, screener, strategy lab | 34 indicators, OMS Script, backtester with robustness tools, screener |
 | 8 / 9 Trading and bots | Paper broker, gateway + risk engine, portfolio, rule/DCA/grid bots, recovery, alerts |
 | 10 / 11 AI, MCP, plugins, automation | Optional AI analysts, MCP server and client, plugin system, workflows |
-| 12 Security and QA | Scans, E2E suite, benchmarks; 15 bugs found and fixed (below) |
+| 12 Security and QA | Scans, E2E suite, benchmarks; 16 bugs found and fixed (below) |
 | 13 Release | Wheel + Linux single-file binary built and verified; documentation complete |
 
 ## Test results for this release (2026-11-22)
@@ -28,11 +28,18 @@ in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) and [FEATURE_MATRIX.md](FEATURE_MATRIX.md)
 | Unit + integration, with live network and local AI | `OMOS_RUN_NETWORK=1 pytest` (Ollama running) | **290 passed**, 0 skipped |
 | Unit + integration, offline | `pytest` | 277 passed, 13 skipped (network) |
 | Coverage | `coverage run --branch --source=src/omos -m pytest` | 78% line+branch of 8,543 statements |
-| Browser end-to-end | `scripts/e2e.sh` | **12/12 passed** (run 5 times during the session after fixes) |
+| Browser end-to-end | `scripts/e2e.sh` | **12/12 passed** (repeated runs after fixes) |
+| Browser E2E incl. phone pairing over the LAN | `OMOS_E2E_LAN=1 scripts/e2e.sh` | **13/13 passed** — see note below |
 | Security scan | `scripts/security_scan.sh` | Passed: 0 HIGH bandit findings, 0 vulnerable Python (91) or shipped npm packages, 0 secrets |
 | Release artifact | `scripts/build_release.sh && scripts/verify_release.sh` | Passed |
 | Benchmarks | `python scripts/benchmark.py` | [PERFORMANCE_BENCHMARKS.md](PERFORMANCE_BENCHMARKS.md) |
 | Web build + type check | `scripts/build_web.sh` | Passed (`tsc --noEmit` clean) |
+
+**LAN note:** in this sandbox, Chromium's WebSocket to the machine's own LAN address is answered
+with HTTP 502 by the network layer, although plain HTTP works. A raw WebSocket client sending the
+same Origin, compression and token handshake to that address gets `101 Switching Protocols` and
+the server's `hello`, so the app side is verified; live updates on a real phone over Wi-Fi were not
+observed here.
 
 ## Bugs found and fixed during release testing
 
@@ -51,10 +58,13 @@ in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) and [FEATURE_MATRIX.md](FEATURE_MATRIX.md)
 12. Sign-in links opened in an already-open tab did nothing.
 13. `omos open/status/mcp` could not find a host started with `--port`.
 14. Process plugins and `omos service` used `sys.executable`, wrong in the single-file build.
-15. Preact 10.27.2 (JSON VNode injection advisory) and Vite 7.1.12 (dev-server advisories) upgraded;
+15. **Remote access did not work:** with `--allow-remote`, phones addressing the PC by its LAN IP
+    got HTTP 421 (the Host allow-list held only loopback names). The machine's own addresses and
+    hostname are now accepted; COOP is no longer sent on plain-HTTP LAN origins.
+16. Preact 10.27.2 (JSON VNode injection advisory) and Vite 7.1.12 (dev-server advisories) upgraded;
     CSP no longer allows WebSockets to any host; KLineChart's NOTICE now ships with the UI.
 
-Fixes 1–14 and the CSP change each have a regression test (unit, integration or E2E) that fails on
+Fixes 1–15 and the CSP change each have a regression test (unit, integration or E2E) that fails on
 the old code. The dependency upgrades are checked by the security scan, and the NOTICE by
 `scripts/verify_release.sh`.
 
