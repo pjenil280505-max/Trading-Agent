@@ -97,6 +97,41 @@ function registerBackendIndicator(spec: IndSpec) {
   })
 }
 
+/** "Compare": another instrument's % change next to this chart's, in its own pane, aligned by bar time. */
+let compareRegistered = false
+function registerCompare() {
+  if (compareRegistered) return
+  compareRegistered = true
+  registerIndicator<Record<string, number | undefined>, number, { other: string; tf: string; cache?: any }>({
+    name: 'omos_compare',
+    shortName: 'Compare %',
+    series: 'normal',
+    precision: 2,
+    figures: [
+      { key: 'base', title: 'this: ', type: 'line', styles: () => ({ color: '#3d8bfd' }) },
+      { key: 'other', title: 'other: ', type: 'line', styles: () => ({ color: '#f0a33a' }) },
+    ],
+    calc: async (dataList: KLineData[], indicator) => {
+      const ext = indicator.extendData
+      if (!ext || !dataList.length) return dataList.map(() => ({}))
+      const now = Date.now()
+      if (!ext.cache || now - ext.cache.at > 15000 || ext.cache.firstTs > dataList[0].timestamp) {
+        const r = await get<{ bars: number[][] }>('/candles', { instrument: ext.other, tf: ext.tf, limit: Math.min(dataList.length + 5, 50000) })
+        ext.cache = { closes: new Map(r.bars.map((b) => [b[0], b[4]])), firstTs: r.bars[0]?.[0] ?? 0, at: now }
+      }
+      const closes: Map<number, number> = ext.cache.closes
+      const b0 = dataList[0].close
+      let o0: number | undefined, last: number | undefined
+      return dataList.map((d) => {
+        const c = closes.get(d.timestamp)
+        if (c !== undefined) last = c  // sessions differ (e.g. stocks vs crypto): carry the last close forward
+        if (o0 === undefined && last !== undefined) o0 = last
+        return { base: (d.close / b0 - 1) * 100, other: last !== undefined && o0 ? (last / o0 - 1) * 100 : undefined }
+      })
+    },
+  })
+}
+
 export type Listener = { onMeta?: (m: DataMeta) => void; onError?: (e: string) => void; onLoading?: (msg: string | null) => void; onCrosshair?: (ts: number | null) => void;
   onRange?: (from: number, to: number) => void; onDrawingsChanged?: () => void }
 
@@ -246,6 +281,11 @@ export class ChartAdapter {
   }
 
   private async createOnChart(ai: ActiveIndicator) {
+    if (ai.id === 'compare') {
+      registerCompare()
+      this.chart.createIndicator({ name: 'omos_compare', id: ai.uid, extendData: { other: ai.params.instrument, tf: this.tf } } as any)
+      return
+    }
     const specs = await indicatorCatalog()
     const spec = specs.find((s) => s.id === ai.id)
     if (!spec) throw new Error(`unknown indicator ${ai.id}`)
@@ -344,6 +384,11 @@ export class ChartAdapter {
   removeDrawing(id: string) { this.chart.removeOverlay({ id }) }
 
   // ---------------------------------------------------------------- sync, snapshot, misc
+  /** Keyboard navigation (used by the chart page's shortcuts). */
+  zoom(factor: number) { (this.chart as any).zoomAtCoordinate?.(factor) }
+  scroll(px: number) { (this.chart as any).scrollByDistance?.(px, 150) }
+  toLatest() { (this.chart as any).scrollToRealTime?.(150) }
+
   showCrosshairAt(ts: number | null) {
     if (ts === null) return
     const px = this.chart.convertToPixel({ timestamp: ts, value: 0 }, { paneId: 'candle_pane' }) as { x?: number }

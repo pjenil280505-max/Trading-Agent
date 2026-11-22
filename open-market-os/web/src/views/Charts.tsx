@@ -126,6 +126,26 @@ function ChartCell(p: { index: number; cfg: CellCfg; focused: boolean; sync: Lay
   }, [])
 
   useEffect(() => { ad.current?.applyTheme() }, [pr.theme])
+  // keyboard shortcuts for the focused chart (ignored while typing in a field)
+  useEffect(() => {
+    if (!p.focused) return
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement
+      if (e.ctrlKey || e.metaKey || e.altKey || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable) return
+      const a = ad.current
+      if (!a) return
+      const keys: Record<string, () => void> = {
+        '+': () => a.zoom(1.25), '=': () => a.zoom(1.25), '-': () => a.zoom(0.8),
+        ArrowLeft: () => a.scroll(120), ArrowRight: () => a.scroll(-120), End: () => a.toLatest(),
+        '/': () => (host.current?.closest('.chartcell')?.querySelector('input[aria-label="Instrument"]') as HTMLInputElement | null)?.focus(),
+        '?': () => toast('Chart keys: + / − zoom · ← → scroll · End latest bar · / change symbol · Esc cancel drawing', 'info', 8000),
+      }
+      const f = keys[e.key]
+      if (f) { e.preventDefault(); f() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [p.focused])
   useEffect(() => { setTimeout(() => ad.current?.resize(), 0) }, [full])
 
   const change = (patch: Partial<CellCfg>, emit = true) => {
@@ -192,6 +212,11 @@ function ChartCell(p: { index: number; cfg: CellCfg; focused: boolean; sync: Lay
           <Btn sm title="Hide/show all" onClick={() => a!.setVisibleAll(!(a!.drawings()[0]?.visible ?? true))}>👁</Btn>
           <Btn sm title="Object tree" onClick={() => setTree(true)}>☷ {a?.drawings().length || 0}</Btn>
           <Btn sm kind="ghost" title="Delete all drawings on this symbol" onClick={() => confirm('Delete all drawings on this symbol?') && a!.clearDrawings()}>🗑</Btn>
+          <Btn sm title="Compare with another symbol (% change, own pane)" onClick={async () => {
+            const other = prompt('Compare with which instrument? e.g. OKX:ETH-USDT, YAHOO:SPY', '')?.trim()
+            if (!other) return
+            try { await a!.addIndicator('compare', { instrument: other.toUpperCase() }); setActive([...a!.indicators]); change({}) } catch (e) { toast(errText(e), 'error') }
+          }}>⇄ Compare</Btn>
           {active.map((i) => <span class="badge" style="color:var(--muted)">{i.id}{Object.keys(i.params).length ? `(${Object.values(i.params).join(',')})` : ''}
             <a href="#" onClick={(e) => { e.preventDefault(); a!.removeIndicator(i.uid); setActive([...a!.indicators]); change({}) }}>✕</a></span>)}
         </div>
