@@ -37,8 +37,10 @@ class HostConfig:
     allow_remote: bool = False  # LAN access is an explicit opt-in
     extra_allowed_hosts: list[str] = field(default_factory=list)  # Host-header allow-list additions
     log_level: str = "INFO"
-    tls_certfile: str = ""
+    tls_certfile: str = ""   # your own certificate for the network listener (default: one made on this computer)
     tls_keyfile: str = ""
+    lan_port: int = 0        # port other devices use (0 = this port + 1)
+    lan_tls: bool = True     # HTTPS for other devices; turning it off sends their sign-in tokens unencrypted
     data_dir: str = ""
 
     @property
@@ -70,6 +72,17 @@ class HostConfig:
             p.mkdir(parents=True, exist_ok=True)
         if os.name == "posix":
             os.chmod(self.data_path, 0o700)
+
+    @property
+    def effective_lan_port(self) -> int:
+        return self.lan_port or self.port + 1
+
+    def local_bind(self) -> str:
+        """The computer's own browser always uses loopback; other devices use the separate network listener."""
+        return self.host if self.host in ("127.0.0.1", "localhost", "::1") else "127.0.0.1"
+
+    def lan_bind(self) -> str:
+        return self.host if self.host not in ("127.0.0.1", "localhost", "::1", "") else "0.0.0.0"
 
     def effective_bind(self) -> str:
         """Never bind to a non-loopback address unless remote access was opted into."""

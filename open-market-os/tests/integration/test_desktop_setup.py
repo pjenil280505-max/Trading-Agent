@@ -510,3 +510,58 @@ def test_launcher_starts_a_background_host_and_the_app_can_quit_it(tmp_path):
     assert desktop.port_free(port), "host did not exit after shutdown"
     log = (home / "logs" / "host-console.log")
     assert log.exists()
+
+
+def test_network_access_uses_https_with_a_pinned_certificate(tmp_path):
+    """Devices on the network get HTTPS with this computer's own certificate; this computer keeps plain HTTP."""
+    import ssl
+    import subprocess
+
+    from omos.security import tls
+
+    home = tmp_path / "lan-home"
+    port = free_port()
+    lan_port = free_port()
+    env = {**os.environ, "OMOS_HOME": str(home), "OMOS_DISABLE_KEYRING": "1",
+           "OMOS_VAULT_PASSPHRASE": "test vault passphrase", "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
+    subprocess.run([sys.executable, "-m", "omos", "config", "--set", f"port={port}", f"lan_port={lan_port}"], env=env,
+                   check=True, capture_output=True, timeout=60)
+    proc = subprocess.Popen([sys.executable, "-m", "omos", "start", "--no-browser", "--allow-remote"], env=env,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        assert any(desktop.healthy(port) or time.sleep(0.3) for _ in range(100)), "host did not start"
+        tok = json.loads(subprocess.run([sys.executable, "-m", "omos", "token", "--scopes", "read,admin", "--days", "1"],
+                                        env=env, capture_output=True, text=True, timeout=60).stdout)["token"]
+        hdr = {"Authorization": f"Bearer {tok}"}
+        lan = httpx.get(f"http://127.0.0.1:{port}/api/system/lan", headers=hdr, trust_env=False).json()
+        assert lan["active"] and lan["tls"] and lan["port"] == lan_port and len(lan["fingerprint"]) == 64
+        # the certificate the network listener presents is exactly the one devices are told to pin
+        ctx = ssl.create_default_context()
+        ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+        with socket.create_connection(("127.0.0.1", lan_port), timeout=5) as raw, ctx.wrap_socket(raw) as s:
+            der = s.getpeercert(binary_form=True)
+        assert hashlib.sha256(der).hexdigest() == lan["fingerprint"]
+        assert tls.short_fingerprint(lan["fingerprint"]) == lan["fingerprint_short"]
+        r = httpx.get(f"https://127.0.0.1:{lan_port}/api/health", verify=False, trust_env=False)
+        assert r.status_code == 200 and r.json()["status"] == "ok"
+        with pytest.raises(httpx.HTTPError):  # no plain HTTP on the network port
+            httpx.get(f"http://127.0.0.1:{lan_port}/api/health", trust_env=False, timeout=5).raise_for_status()
+        # pairing codes carry the addresses and the certificate for the phone app's QR scan
+        pair = httpx.post(f"http://127.0.0.1:{port}/api/auth/pairing", headers=hdr, json={"preset": "monitor"},
+                          trust_env=False).json()
+        assert pair["link"].startswith("omos://pair?") and f"f={lan['fingerprint']}" in pair["link"]
+        assert f"c={pair['code']}" in pair["link"]
+        # a phone exchanges the code over HTTPS and can then use the API there
+        ex = httpx.post(f"https://127.0.0.1:{lan_port}/api/auth/exchange", verify=False, trust_env=False,
+                        json={"code": pair["code"], "device_name": "Android phone"}).json()
+        me = httpx.get(f"https://127.0.0.1:{lan_port}/api/auth/me", verify=False, trust_env=False,
+                       headers={"Authorization": f"Bearer {ex['token']}"}).json()
+        assert me["name"] == "Android phone" and "admin" not in me["scopes"]
+        # the certificate is kept across restarts, so paired phones stay paired
+        cert1 = (home / "tls" / "lan-cert.pem").read_bytes()
+        assert tls.ensure_certificate(home / "tls")[2] == lan["fingerprint"] and (home / "tls" / "lan-cert.pem").read_bytes() == cert1
+        if os.name == "posix":
+            assert ((home / "tls" / "lan-key.pem").stat().st_mode & 0o077) == 0
+    finally:
+        proc.terminate()
+        proc.wait(30)

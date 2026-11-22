@@ -99,6 +99,11 @@ function App() {
   useEffect(() => { document.documentElement.dataset.theme = pr.theme }, [pr.theme])
 
   const boot = async () => {
+    const t = /token=(omos_[A-Za-z0-9_-]+)/.exec(location.hash)
+    if (t) {  // handed over by the Android app, which signed this device in with a pairing code
+      setToken(t[1])
+      history.replaceState({}, '', location.pathname)
+    }
     const m = /code=([A-Za-z0-9-]+)/.exec(location.hash)
     if (m) {
       try { await exchangeCode(m[1]); toast('Signed in on this device', 'ok') } catch (e) { toast(errText(e), 'error') }
@@ -127,7 +132,7 @@ function App() {
     const onAuth = () => { setToken(null); setAuthed(false) }
     window.addEventListener('omos:auth-required', onAuth)
     // a sign-in link opened in a tab that is already showing the app only changes the #hash
-    const onHash = () => { if (/code=/.test(location.hash)) void boot() }
+    const onHash = () => { if (/(code|token)=/.test(location.hash)) void boot() }
     window.addEventListener('hashchange', onHash)
     live.statusListeners.add(setOnline)
     const off = live.on((e) => {

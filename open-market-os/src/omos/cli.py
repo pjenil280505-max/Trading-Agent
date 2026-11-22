@@ -33,10 +33,11 @@ def _port_in_use(host: str, port: int) -> bool:
 RUNTIME_FILE = "host.runtime.json"
 
 
-def _write_runtime(cfg: HostConfig) -> Path:
+def _write_runtime(cfg: HostConfig, lan_port: int | None = None) -> Path:
     """Record the port of the running host, so `omos open/status/mcp` find it even when started with --port."""
     path = cfg.data_path / RUNTIME_FILE
-    path.write_text(json.dumps({"pid": os.getpid(), "port": cfg.port, "started_at": int(time.time())}))
+    path.write_text(json.dumps({"pid": os.getpid(), "port": cfg.port, "lan_port": lan_port,
+                                "started_at": int(time.time())}))
     try:
         path.chmod(0o600)
     except OSError:
@@ -121,20 +122,86 @@ def cmd_start(args) -> int:
             webbrowser.open(url)
         except Exception:  # noqa: BLE001 - headless machines have no browser
             pass
-    ssl = {}
-    if cfg.tls_certfile and cfg.tls_keyfile:
-        ssl = {"ssl_certfile": cfg.tls_certfile, "ssl_keyfile": cfg.tls_keyfile}
     runtime = _write_runtime(cfg)
     app.state.shutdown_hooks = [lambda: _clear_runtime(runtime), host.stop]
-    server = uvicorn.Server(uvicorn.Config(app, host=cfg.effective_bind(), port=cfg.port, log_level="warning",
-                                           access_log=False, **ssl))
-    app.state.server = server  # lets the UI request a clean shutdown or restart
+    servers = [uvicorn.Server(uvicorn.Config(app, host=cfg.local_bind(), port=cfg.port, log_level="warning",
+                                             access_log=False))]
+    app.state.lan = None
+    if cfg.allow_remote:
+        lan = _lan_listener(cfg)
+        if lan:
+            app.state.lan = lan["info"]
+            servers.append(uvicorn.Server(uvicorn.Config(app, host=cfg.lan_bind(), port=lan["port"], log_level="warning",
+                                                         access_log=False, lifespan="off", **lan["ssl"])))
+            _write_runtime(cfg, lan_port=lan["port"])
+            print(f"  Other devices on your network: {', '.join(lan['info']['urls']) or 'no network address found'}"
+                  f"  (certificate check {lan['info']['fingerprint_short']})\n")
+    group = ServerGroup(servers)
+    app.state.server = group  # lets the UI request a clean shutdown or restart
     try:
-        server.run()
+        group.run()
     finally:
         _clear_runtime(runtime)
         host.stop()
     return 0
+
+
+class ServerGroup:
+    """One or two uvicorn servers (this computer + other devices) that start and stop together."""
+
+    def __init__(self, servers):
+        self.servers = servers
+
+    @property
+    def should_exit(self) -> bool:
+        return any(s.should_exit for s in self.servers)
+
+    @should_exit.setter
+    def should_exit(self, value: bool) -> None:
+        for s in self.servers:
+            s.should_exit = value
+
+    def run(self) -> None:
+        if len(self.servers) == 1:
+            self.servers[0].run()
+            return
+        import asyncio
+
+        async def serve_all() -> None:
+            tasks = [asyncio.create_task(s.serve()) for s in self.servers]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            self.should_exit = True  # one stopped (signal, quit from the app): stop the other too
+            await asyncio.gather(*pending, return_exceptions=True)
+            for t in done:
+                if t.exception():
+                    raise t.exception()
+
+        asyncio.run(serve_all())
+
+
+def _lan_listener(cfg) -> dict | None:
+    """Port, TLS settings and what devices need to know, for the network listener."""
+    from omos.config import local_host_names
+    from omos.security import tls
+
+    port = cfg.effective_lan_port
+    if _port_in_use("127.0.0.1", port) or port == cfg.port:
+        print(f"Port {port} for other devices is in use; set lan_port in host.toml. Network access is off.", file=sys.stderr)
+        return None
+    info: dict = {"port": port, "tls": False, "fingerprint": None, "fingerprint_short": None}
+    ssl: dict = {}
+    if cfg.tls_certfile and cfg.tls_keyfile:
+        ssl = {"ssl_certfile": cfg.tls_certfile, "ssl_keyfile": cfg.tls_keyfile}
+        info.update(tls=True, fingerprint=tls.fingerprint(Path(cfg.tls_certfile).read_bytes()), own_certificate=True)
+    elif cfg.lan_tls:
+        cert, key, fp = tls.ensure_certificate(cfg.data_path / "tls", local_host_names())
+        ssl = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)}
+        info.update(tls=True, fingerprint=fp)
+    if info["fingerprint"]:
+        info["fingerprint_short"] = tls.short_fingerprint(info["fingerprint"])
+    scheme = "https" if info["tls"] else "http"
+    info["urls"] = [f"{scheme}://{ip}:{port}" for ip in tls.lan_addresses()]
+    return {"port": port, "ssl": ssl, "info": info}
 
 
 def cmd_launch(args) -> int:

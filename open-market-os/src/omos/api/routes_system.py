@@ -63,18 +63,56 @@ def shutdown(request: Request, info=Depends(ADMIN)):
             "running_bots": h.running_bots()}
 
 
-@router.post("/system/restart")
-def restart(request: Request, info=Depends(ADMIN)):
+def _restart(request: Request, info) -> None:
     h = H(request)
     srv = _server(request)
     cfg = h.cfg
     extra = ["--wait-port", "--port", str(cfg.port)]
     if cfg.allow_remote:
-        extra += ["--allow-remote", "--host", cfg.host]
+        extra.append("--allow-remote")
     desktop.spawn_host(extra, cfg.logs_path / "host-console.log", global_args=["--data-dir", str(cfg.data_path)])
     h.db.audit(info.actor, "system.restart", "host", {})
     _exit_soon(srv)
+
+
+@router.post("/system/restart")
+def restart(request: Request, info=Depends(ADMIN)):
+    _restart(request, info)
     return {"ok": True, "message": "Restarting. The page reconnects by itself in a few seconds."}
+
+
+def lan_info(request: Request) -> dict[str, Any]:
+    h = H(request)
+    live = getattr(request.app.state, "lan", None)
+    return {"enabled": bool(h.cfg.allow_remote), "active": bool(live), "port": (live or {}).get("port"),
+            "tls": bool((live or {}).get("tls")), "fingerprint": (live or {}).get("fingerprint"),
+            "fingerprint_short": (live or {}).get("fingerprint_short"), "urls": (live or {}).get("urls", []),
+            "restart_needed": bool(h.cfg.allow_remote) != bool(live)}
+
+
+@router.get("/system/lan")
+def get_lan(request: Request, info=Depends(READ)):
+    return lan_info(request)
+
+
+@router.put("/system/lan")
+def put_lan(request: Request, payload: dict[str, Any] = Body(...), info=Depends(ADMIN)):
+    """Allow or stop access from other devices on this network (saved, then the app restarts)."""
+    from pathlib import Path
+
+    from omos.config import load_config, save_config
+
+    h = H(request)
+    enabled = bool(payload.get("enabled"))
+    saved = load_config(Path(h.cfg.data_dir) if h.cfg.data_dir else None)
+    saved.allow_remote = enabled
+    save_config(saved)
+    h.cfg.allow_remote = enabled
+    h.db.audit(info.actor, "system.lan", "host", {"enabled": enabled})
+    if getattr(request.app.state, "server", None) is None:
+        return {**lan_info(request), "restarting": False}
+    _restart(request, info)
+    return {**lan_info(request), "restarting": True}
 
 
 @router.get("/system/autostart")

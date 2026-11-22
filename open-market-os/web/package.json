@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "klinecharts": "10.1.1",
-    "preact": "10.29.8"
+    "preact": "10.29.8",
+    "qrcode-generator": "2.0.4"
   },
   "devDependencies": {
     "@preact/preset-vite": "2.10.2",

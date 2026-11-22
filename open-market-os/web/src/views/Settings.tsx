@@ -3,6 +3,7 @@ import { del, get, patch, post, put } from '../api'
 import { Badge, Btn, Card, Confirm, Empty, ErrorBox, Field, Modal, StatusBadge, Tabs, useLoad } from '../components/ui'
 import { can, errText, fmtNum, fmtTime, prefs, toast, useStore } from '../store'
 import { LocalAIPanel, SystemControls } from './Setup'
+import qrcode from 'qrcode-generator'
 
 type Tab = 'general' | 'data' | 'devices' | 'secrets' | 'ai' | 'mcp' | 'plugins' | 'backups' | 'live' | 'audit'
 
@@ -118,35 +119,77 @@ function DataSources() {
   )
 }
 
+/** QR code as an SVG (scanned by the Android app to pair: addresses, one-time code, certificate). */
+function QR(p: { text: string; size?: number }) {
+  const q = qrcode(0, 'M')
+  q.addData(p.text)
+  q.make()
+  const n = q.getModuleCount(), cell = Math.floor((p.size || 220) / (n + 8))
+  const dim = cell * (n + 8)
+  let path = ''
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) path += `M${(c + 4) * cell},${(r + 4) * cell}h${cell}v${cell}h-${cell}z`
+  return <svg width={dim} height={dim} viewBox={`0 0 ${dim} ${dim}`} role="img" aria-label="Pairing QR code" style="background:#fff;border-radius:8px">
+    <path d={path} fill="#000" /></svg>
+}
+
 function Devices() {
   const meta = useLoad(() => get('/system/meta'))
-  const status = useLoad(() => get('/system/status'))
+  const lan = useLoad(() => get('/system/lan'))
   const tokens = useLoad(() => get<any[]>('/auth/tokens'))
   const [preset, setPreset] = useState('paper-control')
   const [label, setLabel] = useState('My phone')
   const [code, setCode] = useState<any>(null)
   const [now, setNow] = useState(Date.now())
+  const [switching, setSwitching] = useState(false)
   useEffect(() => {
     if (!code) return
     const t = setInterval(() => setNow(Date.now()), 500)
     return () => clearInterval(t)
   }, [code])
   const left = code ? Math.max(0, Math.round((code.expiresAt - now) / 1000)) : 0
+  const l = lan.data
+  const toggle = async (enabled: boolean) => {
+    setSwitching(true)
+    try {
+      const r = await put('/system/lan', { enabled })
+      if (r.restarting) {
+        toast(enabled ? 'Turning on network access; the app restarts…' : 'Turning off network access; the app restarts…', 'info', 6000)
+        setTimeout(() => { const t = setInterval(async () => { try { if ((await fetch('/api/health')).ok) { clearInterval(t); location.reload() } } catch { /* restarting */ } }, 1000) }, 2500)
+      } else { lan.reload(); setSwitching(false) }
+    } catch (e) { toast(errText(e), 'error'); setSwitching(false) }
+  }
   return (
     <>
       <Card title="Pair a phone, tablet or another computer">
-        {status.data && !status.data.remote_access && <div class="alertbox warn">Other devices cannot reach this host yet: it only listens on this computer ({status.data.bind}).
-          To allow devices on your home network, restart it with <code>omos start --allow-remote</code>. Use only on a network you trust; there is no cloud relay.</div>}
-        {status.data?.remote_access && <p class="small">On the other device, open <code>http://&lt;this computer's LAN address&gt;:{status.data.port}</code> and type the code.</p>}
-        <div class="row">
+        {l && <label class="row"><input type="checkbox" checked={l.enabled} disabled={switching || !can('admin')} onChange={(e) => toggle((e.target as HTMLInputElement).checked)} />
+          <span>Allow devices on my network (Wi-Fi or cable) to connect
+            <span class="small muted"> — encrypted with this computer's own certificate; each device needs a one-time code. There is no cloud relay.</span></span></label>}
+        {l && !l.enabled && <p class="small muted">Codes also work for another browser on this computer. Phones and tablets need the switch above.</p>}
+        {l?.enabled && !l.active && <div class="alertbox warn">Network access is switched on but not running yet{switching ? ' — restarting…' : '. Restart the app (Settings → General).'}</div>}
+        {l?.active && <div class="alertbox ok small">
+          <div>Address{l.urls.length > 1 ? 'es' : ''} for other devices: {l.urls.length ? l.urls.map((u: string) => <code style="margin-right:8px">{u}</code>) : 'no network connection found'}</div>
+          {l.tls && <div>Certificate check: <b class="mono">{l.fingerprint_short}</b> — a device that shows a different value is not talking to this computer.</div>}
+          {!l.tls && <div class="neg">Encryption is off (lan_tls = false): sign-in tokens cross the network unencrypted.</div>}
+        </div>}
+        <div class="row" style="margin-top:8px">
           <Field label="Permissions"><select value={preset} onChange={(e) => setPreset((e.target as HTMLSelectElement).value)}>
             {Object.entries(meta.data?.pairing_presets || {}).map(([k, v]) => <option value={k}>{k}: {(v as string[]).join(', ')}</option>)}</select></Field>
           <Field label="Device label"><input value={label} onInput={(e) => setLabel((e.target as HTMLInputElement).value)} /></Field>
           <Btn kind="primary" onClick={async () => { try { const r = await post('/auth/pairing', { preset, label }); setNow(Date.now()); setCode({ ...r, expiresAt: Date.now() + r.expires_in_s * 1000 }); tokens.reload() } catch (e) { toast(errText(e), 'error') } }}>Create one-time code</Btn>
         </div>
         {code && <div class="alertbox ok" style="margin-top:8px">
-          <div style="font-size:28px;letter-spacing:4px" class="mono">{left > 0 ? code.code : '— expired —'}</div>
-          <div class="small">{left > 0 ? `valid for ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}, one use only` : 'create a new code'} · grants: {code.scopes.join(', ')}</div>
+          <div class="row" style="align-items:flex-start;gap:16px">
+            {left > 0 && code.link && <QR text={code.link} />}
+            <div class="stack">
+              <div style="font-size:28px;letter-spacing:4px" class="mono">{left > 0 ? code.code : '— expired —'}</div>
+              <div class="small">{left > 0 ? `valid for ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}, one use only` : 'create a new code'} · grants: {code.scopes.join(', ')}</div>
+              {left > 0 && <ol class="small">
+                <li><b>Android app:</b> open Open Market OS on the phone and tap <i>Scan pairing code</i>, then point it at this square.</li>
+                <li><b>Any browser:</b> open {code.lan?.urls?.[0] ? <code>{code.lan.urls[0]}</code> : "this computer's address"}, accept the certificate warning
+                  {code.lan?.fingerprint_short ? <> after checking that the certificate's SHA-256 fingerprint starts with <b class="mono">{code.lan.fingerprint_short}</b></> : null}, and type the code.</li>
+              </ol>}
+            </div>
+          </div>
         </div>}
       </Card>
       <Card title="Signed-in devices and tokens" actions={<Btn sm kind="ghost" onClick={tokens.reload}>Refresh</Btn>}>

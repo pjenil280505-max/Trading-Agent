@@ -332,7 +332,8 @@ class Host:
         hb = {r["component"]: r["ts"] for r in self.db.query("SELECT component, ts FROM heartbeats")}
         return {
             "version": __version__, "started_at": self.started_at, "uptime_s": (now_ms() - self.started_at) / 1000,
-            "data_dir": str(self.cfg.data_path), "bind": self.cfg.effective_bind(), "port": self.cfg.port,
+            "data_dir": str(self.cfg.data_path), "bind": self.cfg.local_bind(), "port": self.cfg.port,
+            "lan_port": self.cfg.effective_lan_port if self.cfg.allow_remote else None,
             "remote_access": self.cfg.allow_remote, "loops": [lp.status() for lp in self.loops.values()],
             "heartbeats": hb, "providers": self.market.health_report(), "subscriptions": len(self.subscriptions),
             "secrets": self.secrets.status(), "device": self.device, "live_trading_enabled": bool(self.db.get_setting("trading.live_enabled", False)),

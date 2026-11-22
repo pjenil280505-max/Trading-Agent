@@ -103,8 +103,19 @@ def live_trading(request: Request, payload: dict[str, Any] = Body(...), info=Dep
 # ====================================================================== auth admin
 @router.post("/auth/pairing")
 def pairing(request: Request, payload: dict[str, Any] = Body(...), info=Depends(ADMIN)):
-    return H(request).auth.create_pairing_code(str(payload.get("preset", "monitor")), str(payload.get("label", ""))[:80],
-                                               actor=info.actor)
+    from urllib.parse import urlencode
+
+    from omos.api.routes_system import lan_info
+
+    out = H(request).auth.create_pairing_code(str(payload.get("preset", "monitor")), str(payload.get("label", ""))[:80],
+                                              actor=info.actor)
+    lan = lan_info(request)
+    out["lan"] = lan
+    if lan["active"] and lan["urls"]:
+        # what the phone app scans: every address of this computer, the code, and the certificate to pin
+        q = [("u", u) for u in lan["urls"]] + [("c", out["code"])] + ([("f", lan["fingerprint"])] if lan["fingerprint"] else [])
+        out["link"] = "omos://pair?" + urlencode(q)
+    return out
 
 
 @router.get("/auth/tokens")

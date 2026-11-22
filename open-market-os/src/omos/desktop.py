@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 
 APP_NAME = "Open Market OS"
 AUTOSTART_ID = "OpenMarketOS"
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 MAC_AGENT = "org.openmarketos.host"
 
 
@@ -156,6 +157,9 @@ def entry() -> int:
 # ---------------------------------------------------------------------------------- user messages
 def notify_user(title: str, message: str) -> None:
     log.error("%s: %s", title, message)
+    if os.environ.get("OMOS_HEADLESS"):  # automated runs: nobody could close a dialog
+        print(f"{title}: {message}", file=sys.stderr)
+        return
     try:
         if os.name == "nt":
             import ctypes
@@ -191,12 +195,12 @@ def get_autostart() -> dict[str, Any]:
     try:
         if os.name == "nt":
             import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as k:
-                try:
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
                     val, _ = winreg.QueryValueEx(k, AUTOSTART_ID)
-                    return {"supported": True, "enabled": True, "method": "Windows sign-in (Run key)", "command": val}
-                except FileNotFoundError:
-                    return {"supported": True, "enabled": False, "method": "Windows sign-in (Run key)"}
+                return {"supported": True, "enabled": True, "method": "Windows sign-in (Run key)", "command": val}
+            except FileNotFoundError:  # no Run key yet (new profiles) or no entry
+                return {"supported": True, "enabled": False, "method": "Windows sign-in (Run key)"}
         if sys.platform == "darwin":
             p = _home() / "Library" / "LaunchAgents" / f"{MAC_AGENT}.plist"
             return {"supported": True, "enabled": p.exists(), "method": "macOS login (LaunchAgent)", "path": str(p)}
@@ -211,8 +215,8 @@ def set_autostart(enabled: bool) -> dict[str, Any]:
     cmd = _autostart_cmd()
     if os.name == "nt":
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0,
-                            winreg.KEY_SET_VALUE) as k:
+        # CreateKeyEx opens the key, creating it first on profiles that have never had one
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
             if enabled:
                 winreg.SetValueEx(k, AUTOSTART_ID, 0, winreg.REG_SZ, subprocess.list2cmdline(cmd))
             else:

@@ -74,7 +74,12 @@ def wait(pred, timeout: float) -> bool:
 
 
 def run(cmd: list[str], env: dict, timeout: float = 120) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
+    try:
+        return subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        err = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        return subprocess.CompletedProcess(cmd, -9, out, err + f"\n[timed out after {timeout} s]")
 
 
 def main() -> int:
@@ -89,7 +94,8 @@ def main() -> int:
     cli = [a.cli] if a.cli else launcher
     home = Path(a.data_dir or tempfile.mkdtemp(prefix="omos-smoke-"))
     port = free_port()
-    env = {**os.environ, "OMOS_HOME": str(home), "OMOS_NO_BROWSER": "1"}
+    # OMOS_HEADLESS: report start-up errors in the log instead of a dialog nobody can click in CI
+    env = {**os.environ, "OMOS_HOME": str(home), "OMOS_NO_BROWSER": "1", "OMOS_HEADLESS": "1"}
     if not a.keyring:
         env.update(OMOS_DISABLE_KEYRING="1", OMOS_VAULT_PASSPHRASE="smoke test vault passphrase")
     print(f"data folder {home}, port {port}")
@@ -105,12 +111,14 @@ def main() -> int:
     except ValueError:
         doc = {}
     check(r.returncode == 0 and doc.get("web_ui_built") is True, "doctor: web UI is bundled")
+    if not doc:
+        print(f"   doctor exit code {r.returncode}\n   stdout: {r.stdout[-3000:]}\n   stderr: {r.stderr[-6000:]}")
     check(run([*cli, "config", "--set", f"port={port}"], env).returncode == 0, "config set port")
 
     step("open the app the way the icon does")
     t0 = time.monotonic()
     r = run(launcher, env, timeout=180)
-    check(r.returncode == 0, f"launcher exits 0 after starting the background host ({time.monotonic() - t0:.1f} s) {r.stderr[-500:]}")
+    check(r.returncode == 0, f"launcher exits 0 after starting the background host ({time.monotonic() - t0:.1f} s) {r.stderr[-3000:]}")
     check(healthy(port), "host is healthy")
     st, raw = http("GET", f"http://127.0.0.1:{port}/")
     check(st == 200 and b'<div id="app"' in raw, "web UI is served")
@@ -149,11 +157,18 @@ def main() -> int:
     check(r.returncode == 0 and json.loads(r.stdout or "{}").get("enabled") is False, "autostart off")
 
     step("restart from the app")
+    started = status.get("started_at")
     st, raw = http("POST", f"{base}/system/restart", tok)
     check(st == 200, "restart accepted")
-    went_down = wait(lambda: not healthy(port), 30)
-    came_back = wait(lambda: healthy(port), 120)
-    check(went_down and came_back, "host restarted on the same port")
+
+    def restarted() -> bool:  # a new host process (new start time) answering on the same port
+        try:
+            s2, r2 = http("GET", f"{base}/system/status", tok, timeout=5)
+            return s2 == 200 and json.loads(r2).get("started_at") != started
+        except (OSError, ValueError):
+            return False
+    check(wait(restarted, 120), "host restarted on the same port")
+    check(healthy(port), "healthy after the restart")
 
     step("quit")
     r = run([*cli, "stop"], env, timeout=90)
