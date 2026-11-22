@@ -119,7 +119,12 @@ class FundamentalsService:
                         d = (date.fromisoformat(f["end"]) - date.fromisoformat(f["start"])).days
                         if (fp == "FY" and not 330 <= d <= 380) or (fp is None and not 80 <= d <= 100):
                             continue
-                    row = by_period.setdefault(period, {"period_end": period, "fiscal_year": f.get("fy"), "form": f.get("form")})
+                    row = by_period.setdefault(period, {"period_end": period, "fiscal_year": f.get("fy"), "form": f.get("form"),
+                                                        "_label_filed": f.get("filed", "")})
+                    # a later 10-K restates this period as a comparative under ITS fiscal year: label the
+                    # period from the earliest filing that reports it, whatever order the facts come in
+                    if f.get("filed", "") and f.get("filed", "") < row["_label_filed"]:
+                        row.update(fiscal_year=f.get("fy"), form=f.get("form"), _label_filed=f.get("filed", ""))
                     if item not in row or f.get("filed", "") > row.get(f"_{item}_filed", ""):
                         row[item] = f.get("val")
                         row[f"_{item}_filed"] = f.get("filed", "")

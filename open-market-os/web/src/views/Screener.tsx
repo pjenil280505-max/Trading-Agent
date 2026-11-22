@@ -23,6 +23,7 @@ export function Screener() {
   const [res, setRes] = useState<any>(null)
   const [err, setErr] = useState<unknown>(null)
   const [name, setName] = useState('')
+  const [schedule, setSchedule] = useState('')
   const fields: Record<string, string> = meta.data?.screener_fields || {}
   const wlId = wl || wls.data?.[0]?.id
   const def = () => ({ universe: { watchlist_id: wlId }, timeframe: tf, filter: { op, rules }, sort: { field: 'change_pct', desc: true } })
@@ -58,7 +59,11 @@ export function Screener() {
             <Btn sm onClick={() => setRules([...rules, { expr: 'close > sma(close, 50)' }])}>+ Formula (OMS Script)</Btn>
             <span class="sp" />
             <input placeholder="Save as…" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-            <Btn sm onClick={async () => { try { await post('/screeners', { name, definition: def() }); saved.reload(); toast('Saved', 'ok') } catch (e) { toast(errText(e), 'error') } }}>Save</Btn>
+            <select aria-label="Run automatically" value={schedule} onChange={(e) => setSchedule((e.target as HTMLSelectElement).value)}
+              title="Scheduled scans run on the host while it is on and notify you about NEW matches">
+              <option value="">run manually</option><option value="15">every 15 min</option><option value="60">every hour</option>
+              <option value="240">every 4 hours</option><option value="1440">once a day</option></select>
+            <Btn sm onClick={async () => { try { await post('/screeners', { name, definition: def(), schedule_minutes: schedule ? Number(schedule) : null }); saved.reload(); toast(schedule ? 'Saved; it will run on schedule and notify you about new matches' : 'Saved', 'ok') } catch (e) { toast(errText(e), 'error') } }}>Save</Btn>
             <Btn kind="primary" onClick={async () => { try { setErr(null); setRes(await post('/screener/run', { definition: def() })) } catch (e) { setErr(e) } }}>Run screen</Btn>
           </div>
         </div>

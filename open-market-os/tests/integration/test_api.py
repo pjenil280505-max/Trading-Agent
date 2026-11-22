@@ -341,3 +341,26 @@ def test_shutdown_hooks_run_on_lifespan_exit(env):
     with TestClient(app):
         assert ran == []
     assert ran == ["a", "b"]  # a failing hook does not skip the others
+
+
+def test_scheduled_screener_runs_and_notifies_only_new_matches(env):
+    host, c = env["host"], env["client"]
+    wl = c.post("/api/watchlists", json={"name": "sched"}).json()
+    c.post(f"/api/watchlists/{wl['id']}/items", json={"instrument_id": "TEST:ABC"})
+    definition = {"universe": {"watchlist_id": wl["id"]}, "timeframe": "1m",
+                  "filter": {"op": "and", "rules": [{"field": "rsi14", "cmp": ">=", "value": 0}]}}
+    r = c.post("/api/screeners", json={"name": "always", "definition": definition, "schedule_minutes": 5})
+    assert r.status_code == 200, r.text
+
+    def screener_notes():
+        return [n for n in c.get("/api/notifications").json() if n["category"] == "screener"]
+
+    host._automation()                       # due: never run before
+    notes = screener_notes()
+    assert len(notes) == 1 and "1 new match" in notes[0]["title"] and "TEST:ABC" in notes[0]["body"]
+    host._automation()                       # not due again for 5 minutes
+    sid = c.get("/api/screeners").json()[0]["id"]
+    host.db.execute("UPDATE screeners SET last_run_at = 0 WHERE id = ?", (sid,))
+    host._automation()                       # due again, same match: no repeat notification
+    assert len(screener_notes()) == 1
+    assert len(host.db.query("SELECT id FROM screener_runs WHERE screener_id = ?", (sid,))) == 2

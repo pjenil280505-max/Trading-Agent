@@ -215,11 +215,17 @@ class ScreenerService:
 
     def run_saved(self, screener_id: int) -> dict[str, Any]:
         s = self.get(screener_id)
+        prev = self.db.query_one("SELECT results FROM screener_runs WHERE screener_id = ? ORDER BY id DESC LIMIT 1",
+                                 (screener_id,))
+        before = set(loads(prev["results"], {}).get("matched", [])) if prev else set()
         result = self.run(s["definition"])
+        matched = [r["instrument_id"] for r in result["results"]]
         self.db.execute("INSERT INTO screener_runs(screener_id, ts, results) VALUES (?,?,?)",
-                        (screener_id, now_ms(), dumps({"matched": [r["instrument_id"] for r in result["results"]],
-                                                       "errors": result["errors"]})))
+                        (screener_id, now_ms(), dumps({"matched": matched, "errors": result["errors"]})))
         self.db.execute("UPDATE screeners SET last_run_at = ? WHERE id = ?", (now_ms(), screener_id))
+        # what changed since the previous run, so scheduled scans notify once per new match, not every time
+        result["new_matches"] = [m for m in matched if m not in before]
+        result["screener"] = {"id": s["id"], "name": s["name"]}
         return result
 
     def due(self) -> list[int]:

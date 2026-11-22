@@ -16,3 +16,5 @@ releases/
 e2e-artifacts/
 scan-reports/
 benchmarks.json
+.coverage
+htmlcov/

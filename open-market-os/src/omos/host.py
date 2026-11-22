@@ -245,6 +245,10 @@ class Host:
                 res = self.screener.run_saved(sid)
                 if res["results"]:
                     self.bus.publish("screener_match", {"screener_id": sid, "matched": [r["instrument_id"] for r in res["results"]]})
+                if res["new_matches"]:
+                    new = res["new_matches"]
+                    self.notifier.notify(f"Screener '{res['screener']['name']}': {len(new)} new match(es)",
+                                         ", ".join(new[:10]) + (" …" if len(new) > 10 else ""), category="screener")
             except OmosError as exc:
                 log.warning("scheduled screener %s failed: %s", sid, exc.message)
 

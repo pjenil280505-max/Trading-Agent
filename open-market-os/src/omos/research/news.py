@@ -17,9 +17,10 @@ import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
+from defusedxml import DefusedXmlException
 from defusedxml import ElementTree as ET
 
 from omos.errors import OmosError, ValidationError
@@ -47,7 +48,7 @@ _TAG = re.compile(r"<[^>]+>")
 
 
 def strip_html(s: str) -> str:
-    return html.unescape(_TAG.sub(" ", s or "")).replace("\xa0", " ").strip()
+    return re.sub(r"\s+", " ", html.unescape(_TAG.sub(" ", s or "")).replace("\xa0", " ")).strip()
 
 
 def lexicon_sentiment(text: str) -> float:
@@ -62,6 +63,8 @@ def parse_feed(xml_bytes: bytes, source: str) -> list[dict[str, Any]]:
         root = ET.fromstring(xml_bytes)
     except ET.ParseError as exc:
         raise OmosError(f"{source}: feed is not valid XML") from exc
+    except DefusedXmlException as exc:  # DTD / entity tricks (XXE, entity expansion): refuse this feed only
+        raise OmosError(f"{source}: feed uses forbidden XML features ({type(exc).__name__})") from exc
     items = []
     ns_atom = "{http://www.w3.org/2005/Atom}"
     for it in list(root.iter("item")) + list(root.iter(f"{ns_atom}entry")):
@@ -130,7 +133,7 @@ class NewsService:
         for sym in (symbols or [])[:30]:
             ticker = sym.split(":", 1)[-1]
             try:
-                items = self._fetch(f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US",
+                items = self._fetch(f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={quote(ticker, safe='')}&region=US&lang=en-US",
                                     "Yahoo Finance (unofficial RSS)")
                 for i in items:
                     i["symbols"] = [sym]
