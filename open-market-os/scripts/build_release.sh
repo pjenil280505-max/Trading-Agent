@@ -23,7 +23,21 @@ echo "== web UI"
 scripts/build_web.sh
 
 echo "== wheel"
+# setuptools reuses build/ between runs; stale files there (e.g. an older UI bundle) would be packed
+# into the wheel, so always start from a clean build directory.
+rm -rf "$ROOT/build"
 "$PY" -m pip wheel . --no-deps --no-build-isolation -q -w "$OUT"
+"$PY" - "$OUT"/open_market_os-"$VER"-*.whl <<'EOF'
+import re, sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+names = z.namelist()
+html = z.read("omos/web/dist/index.html").decode()
+assets = [n for n in names if n.startswith("omos/web/dist/assets/")]
+unused = [a for a in assets if a.rsplit("/", 1)[1] not in html]
+if unused:
+    sys.exit(f"wheel contains UI assets not referenced by index.html (stale build?): {unused}")
+print(f"  wheel ok: {len(names)} files, {len(assets)} UI assets, all referenced")
+EOF
 
 echo "== single-file binary (PyInstaller)"
 "$BIN/pyinstaller" --noconfirm --clean --onefile --name omos --log-level WARN \

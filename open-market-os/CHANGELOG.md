@@ -22,7 +22,7 @@ First release. Paper trading only; verified builds for Linux x86_64. See
 - Scripts for E2E tests, security scans, benchmarks and release builds; full documentation.
 
 ### Fixed during release testing
-Sixteen defects found by the E2E, packaging and coverage work — including a data-loss bug that
+Seventeen defects found by the E2E, packaging and coverage work — including a data-loss bug that
 deleted saved drawings, remote access returning 421, shutdown cleanup never running, MCP tool errors
 reported as success, and a cache path that could show the previous close as the live price. Listed
 in [docs/DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md).

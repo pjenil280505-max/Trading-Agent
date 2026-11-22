@@ -18,7 +18,7 @@ ones that are not built.
 **Evidence codes:** U = unit tests (`tests/unit`), I = API integration tests (`tests/integration`),
 L = live-network tests (`OMOS_RUN_NETWORK=1`), E = browser end-to-end tests (`scripts/e2e.sh`),
 R = release check (`scripts/verify_release.sh`), M = manual check this session.
-Latest results: 290 pytest cases passed (incl. network and local AI), 12/12 E2E passed,
+Latest results: 291 pytest cases passed (incl. network and local AI), 12/12 E2E passed (13/13 with the LAN test),
 release check passed — see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 
 ## Platform and architecture

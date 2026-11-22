@@ -18,19 +18,19 @@ in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) and [FEATURE_MATRIX.md](FEATURE_MATRIX.md)
 | 6 / 7 Indicators, screener, strategy lab | 34 indicators, OMS Script, backtester with robustness tools, screener |
 | 8 / 9 Trading and bots | Paper broker, gateway + risk engine, portfolio, rule/DCA/grid bots, recovery, alerts |
 | 10 / 11 AI, MCP, plugins, automation | Optional AI analysts, MCP server and client, plugin system, workflows |
-| 12 Security and QA | Scans, E2E suite, benchmarks; 16 bugs found and fixed (below) |
+| 12 Security and QA | Scans, E2E suite, benchmarks; 17 defects found and fixed (below) |
 | 13 Release | Wheel + Linux single-file binary built and verified; documentation complete |
 
 ## Test results for this release (2026-11-22)
 
 | Suite | Command | Result |
 |---|---|---|
-| Unit + integration, with live network and local AI | `OMOS_RUN_NETWORK=1 pytest` (Ollama running) | **290 passed**, 0 skipped |
-| Unit + integration, offline | `pytest` | 277 passed, 13 skipped (network) |
+| Unit + integration, with live network and local AI | `OMOS_RUN_NETWORK=1 pytest` (Ollama running) | **291 passed**, 0 skipped |
+| Unit + integration, offline | `pytest` | 278 passed, 13 skipped (network) |
 | Coverage | `coverage run --branch --source=src/omos -m pytest` | 78% line+branch of 8,543 statements |
 | Browser end-to-end | `scripts/e2e.sh` | **12/12 passed** (repeated runs after fixes) |
 | Browser E2E incl. phone pairing over the LAN | `OMOS_E2E_LAN=1 scripts/e2e.sh` | **13/13 passed** — see note below |
-| Security scan | `scripts/security_scan.sh` | Passed: 0 HIGH bandit findings, 0 vulnerable Python (91) or shipped npm packages, 0 secrets |
+| Security scan | `scripts/security_scan.sh` | Passed: 0 HIGH bandit findings, 0 vulnerable Python (92) or shipped npm packages, 0 secrets |
 | Release artifact | `scripts/build_release.sh && scripts/verify_release.sh` | Passed |
 | Benchmarks | `python scripts/benchmark.py` | [PERFORMANCE_BENCHMARKS.md](PERFORMANCE_BENCHMARKS.md) |
 | Web build + type check | `scripts/build_web.sh` | Passed (`tsc --noEmit` clean) |
@@ -61,12 +61,15 @@ observed here.
 15. **Remote access did not work:** with `--allow-remote`, phones addressing the PC by its LAN IP
     got HTTP 421 (the Host allow-list held only loopback names). The machine's own addresses and
     hostname are now accepted; COOP is no longer sent on plain-HTTP LAN origins.
-16. Preact 10.27.2 (JSON VNode injection advisory) and Vite 7.1.12 (dev-server advisories) upgraded;
+16. **Release build:** setuptools reused a stale `build/` directory, so a wheel could contain an
+    old UI bundle next to the current one. The build now starts clean and fails if the wheel holds
+    any UI asset that `index.html` does not reference.
+17. Preact 10.27.2 (JSON VNode injection advisory) and Vite 7.1.12 (dev-server advisories) upgraded;
     CSP no longer allows WebSockets to any host; KLineChart's NOTICE now ships with the UI.
 
 Fixes 1–15 and the CSP change each have a regression test (unit, integration or E2E) that fails on
 the old code. The dependency upgrades are checked by the security scan, and the NOTICE by
-`scripts/verify_release.sh`.
+`scripts/verify_release.sh`; fix 16 by a guard in `scripts/build_release.sh`.
 
 ## How to resume work
 
@@ -74,7 +77,7 @@ the old code. The dependency upgrades are checked by the security scan, and the 
 cd open-market-os
 python -m venv .venv && . .venv/bin/activate && pip install -e '.[dev]'
 scripts/build_web.sh
-pytest                                  # expect 277 passed, 13 skipped offline
+pytest                                  # expect 278 passed, 13 skipped offline
 scripts/e2e.sh                          # needs Node + Playwright + Chromium
 scripts/security_scan.sh
 ```
