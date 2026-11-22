@@ -139,14 +139,14 @@ jobs:
         run: |
           $env:OMOS_NO_BROWSER = '1'
           $app = "$env:LOCALAPPDATA\Programs\Open Market OS"
-          Start-Process "$app\Open Market OS.exe" -Wait
+          (Start-Process "$app\Open Market OS.exe" -PassThru).WaitForExit()  # -Wait would also wait for the background host
           $port = (Get-Content "$env:LOCALAPPDATA\OpenMarketOS\host.runtime.json" | ConvertFrom-Json).port
           (Invoke-RestMethod "http://127.0.0.1:$port/api/health").status
           $setup = (Get-ChildItem releases\*-setup.exe)[0].FullName
           $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=update.log' -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content update.log -Tail 60; exit 1 }
           try { Invoke-RestMethod "http://127.0.0.1:$port/api/health" -TimeoutSec 3; Write-Error 'app was not stopped for the update'; exit 1 } catch { 'app was stopped for the update' }
-          Start-Process "$app\Open Market OS.exe" -Wait
+          (Start-Process "$app\Open Market OS.exe" -PassThru).WaitForExit()  # -Wait would also wait for the background host
           (Invoke-RestMethod "http://127.0.0.1:$port/api/health").status
           if (-not (Test-Path "$env:LOCALAPPDATA\OpenMarketOS\omos.db")) { Write-Error 'data lost in update'; exit 1 }
           & "$app\omos.exe" stop
