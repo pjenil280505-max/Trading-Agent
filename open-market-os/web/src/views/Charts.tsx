@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { get, put } from '../api'
+import { del, get, put } from '../api'
 import { ChartAdapter, indicatorCatalog, type ActiveIndicator, type ChartKind, type DataMeta, type IndSpec, type Scale } from '../chart/adapter'
 import { DRAWING_TOOLS } from '../chart/overlays'
 import { Btn, Field, Modal, StatusBadge } from '../components/ui'
@@ -90,6 +90,7 @@ function ChartCell(p: { index: number; cfg: CellCfg; focused: boolean; sync: Lay
   const [tree, setTree] = useState(false)
   const [full, setFull] = useState(false)
   const [results, setResults] = useState<any[]>([])
+  const [templates, setTemplates] = useState<any[]>([])
   const [, setTick] = useState(0)
   const pr = useStore(prefs)
   const cfg = useRef(p.cfg)
@@ -112,6 +113,7 @@ function ChartCell(p: { index: number; cfg: CellCfg; focused: boolean; sync: Lay
     a.setScale(p.cfg.scale)
     Promise.all(p.cfg.indicators.map((i) => a.addIndicator(i.id, i.params))).then(() => setActive([...a.indicators])).catch((e) => setError(errText(e)))
     indicatorCatalog().then(setSpecs).catch(() => {})
+    get<any[]>('/chart_templates').then(setTemplates).catch(() => {})
     const onSync = (m: SyncMsg) => {
       if (m.from === p.index) return
       if (m.kind === 'crosshair') a.showCrosshairAt(m.value)
@@ -212,6 +214,35 @@ function ChartCell(p: { index: number; cfg: CellCfg; focused: boolean; sync: Lay
           <Btn sm title="Hide/show all" onClick={() => a!.setVisibleAll(!(a!.drawings()[0]?.visible ?? true))}>👁</Btn>
           <Btn sm title="Object tree" onClick={() => setTree(true)}>☷ {a?.drawings().length || 0}</Btn>
           <Btn sm kind="ghost" title="Delete all drawings on this symbol" onClick={() => confirm('Delete all drawings on this symbol?') && a!.clearDrawings()}>🗑</Btn>
+          <select aria-label="Chart template" title="Chart templates: indicator sets and chart style" value="" onChange={async (e) => {
+            const v = (e.target as HTMLSelectElement).value
+            ;(e.target as HTMLSelectElement).value = ''
+            try {
+              if (v === '__save') {
+                const name = prompt('Template name (letters, digits, - and _)', 'My template')?.trim()
+                if (!name) return
+                await put(`/chart_templates/${encodeURIComponent(name)}`, { config: { kind: cfg.current.kind, scale: cfg.current.scale,
+                  indicators: a!.indicators.map((i) => ({ id: i.id, params: i.params })) } })
+                toast(`Template "${name}" saved`, 'ok'); setTemplates(await get('/chart_templates'))
+              } else if (v.startsWith('del:')) {
+                if (!confirm(`Delete template "${v.slice(4)}"?`)) return
+                await del(`/chart_templates/${encodeURIComponent(v.slice(4))}`); setTemplates(await get('/chart_templates'))
+              } else if (v) {
+                const t = templates.find((x: any) => x.name === v)
+                if (!t) return
+                for (const i of [...a!.indicators]) a!.removeIndicator(i.uid)
+                for (const i of t.config.indicators || []) await a!.addIndicator(i.id, i.params || {})
+                setActive([...a!.indicators])
+                change({ ...(t.config.kind ? { kind: t.config.kind } : {}), ...(t.config.scale ? { scale: t.config.scale } : {}) })
+                toast(`Template "${v}" applied`, 'ok')
+              }
+            } catch (err) { toast(errText(err), 'error') }
+          }}>
+            <option value="">Templates…</option>
+            {templates.map((t: any) => <option value={t.name}>Apply: {t.name}</option>)}
+            <option value="__save">Save current as template…</option>
+            {templates.map((t: any) => <option value={`del:${t.name}`}>Delete: {t.name}</option>)}
+          </select>
           <Btn sm title="Compare with another symbol (% change, own pane)" onClick={async () => {
             const other = prompt('Compare with which instrument? e.g. OKX:ETH-USDT, YAHOO:SPY', '')?.trim()
             if (!other) return

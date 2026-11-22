@@ -350,6 +350,12 @@ def save_template(name: str, request: Request, payload: dict[str, Any] = Body(..
     return H(request).charts.save_template(name, payload.get("config") or {})
 
 
+@router.delete("/chart_templates/{name}")
+def delete_template(name: str, request: Request, info=Depends(PAPER)):
+    H(request).charts.delete_template(name)
+    return {"deleted": name}
+
+
 # ====================================================================== strategies, backtests
 @router.get("/script/functions")
 def script_functions(info=Depends(READ)):
