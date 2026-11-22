@@ -54,7 +54,7 @@ TRANSITIONS: dict[str, set[str]] = {
     "paper_tested": {"approved", "running", "configured", "archived", "backtested"},
     "approved": {"running", "configured", "archived", "backtested"},
     "running": {"paused", "stopped", "error", "recovering"},
-    "paused": {"running", "stopped", "archived"},
+    "paused": {"running", "stopped", "archived", "configured"},  # reconfiguring needs re-validation
     "error": {"recovering", "running", "stopped", "archived", "configured"},
     "recovering": {"running", "error", "stopped", "paused"},
     "stopped": {"running", "configured", "archived", "backtested", "paper_tested"},

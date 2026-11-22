@@ -47,6 +47,16 @@ def test_lifecycle_and_illegal_transitions(st):
     assert states == ["created", "configured", "validated", "backtested", "running", "paused", "running", "stopped"]
 
 
+def test_paused_bot_can_be_reconfigured_but_must_revalidate(st):
+    b = st.bots.validate(new_bot(st)["id"])
+    st.bots.start(b["id"])
+    st.bots.pause(b["id"])
+    b = st.bots.configure(b["id"], {"script": CROSS, "size_value": 10, "lookback_bars": 60})
+    assert b["state"] == "configured" and b["config"]["size_value"] == 10
+    with pytest.raises(InvalidState):
+        st.bots.start(b["id"])                 # a changed bot must be validated again
+
+
 def test_live_approval_requires_paper_test_and_exact_confirmation(st):
     b = st.bots.validate(new_bot(st)["id"])
     with pytest.raises(ValidationError):

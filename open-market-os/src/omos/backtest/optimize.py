@@ -31,15 +31,19 @@ def _grid(prog: Program, ranges: dict[str, list[float]] | None) -> list[dict[str
                 raise ValidationError(f"parameter '{k}' needs 1–50 values")
             space[k] = [float(v) for v in vals]
     else:
-        for name, p in prog.params.items():
-            if p.bounds:
-                lo, hi, step = p.bounds
-                count = int(math.floor((hi - lo) / step)) + 1
-                if count > 25:  # coarsen automatically, keep endpoints
-                    vals = list(np.linspace(lo, hi, 25))
-                else:
-                    vals = [lo + k * step for k in range(count)]
-                space[name] = [round(v, 10) for v in vals]
+        bounded = {name: p.bounds for name, p in prog.params.items() if p.bounds}
+        # Spread the combination budget across the parameters so a script's own declared ranges
+        # always produce a runnable default grid (e.g. 2 params -> at most 20 values each).
+        per_param = max(2, min(25, int(MAX_COMBINATIONS ** (1 / len(bounded)) + 1e-9))) if bounded else 0
+        for name, (lo, hi, step) in bounded.items():
+            count = int(math.floor((hi - lo) / step + 1e-9)) + 1
+            if count > per_param:  # coarsen automatically, keep endpoints
+                vals = [float(v) for v in np.linspace(lo, hi, per_param)]
+                if all(float(x).is_integer() for x in (lo, hi, step)):
+                    vals = sorted({float(round(v)) for v in vals})  # lengths/periods stay whole numbers
+            else:
+                vals = [lo + k * step for k in range(count)]
+            space[name] = [round(v, 10) for v in vals]
     if not space:
         raise ValidationError("no parameters to optimise: declare ranges like `param fast = 9 (5, 30, 1)`")
     combos = 1

@@ -195,6 +195,31 @@ def test_optimize_grid_limit(ohlcv):
         optimize(src, ohlcv, ranges={"a": list(range(1, 50)), "b": list(range(1, 50))})
 
 
+def test_default_grid_fits_budget_for_every_template():
+    """A script's own declared ranges must give a runnable default grid (regression: ema_cross gave 625 > 400)."""
+    from omos.backtest.optimize import MAX_COMBINATIONS, _grid
+    from omos.backtest.strategies import TEMPLATES
+    from omos.script.lang import parse
+
+    checked = 0
+    for t in TEMPLATES.values():
+        prog = parse(t["source"])
+        if not any(p.bounds for p in prog.params.values()):
+            continue
+        grid = _grid(prog, None)
+        assert 1 <= len(grid) <= MAX_COMBINATIONS
+        for name, p in prog.params.items():
+            lo, hi, step = p.bounds
+            vals = sorted({g[name] for g in grid})
+            assert vals[0] == lo and vals[-1] == hi  # endpoints kept
+            if all(float(x).is_integer() for x in (lo, hi, step)):
+                assert all(v.is_integer() for v in vals)  # periods stay whole numbers
+        checked += 1
+    assert checked >= 3
+    big = parse("param a = 5 (1, 300, 1)\nparam b = 5 (1, 300, 1)\nparam c = 2 (1, 9, 1)\nlong_entry = close > sma(close, a)\n")
+    assert len(_grid(big, None)) <= MAX_COMBINATIONS
+
+
 def test_equity_never_nan(ohlcv):
     r = backtest_script("long_entry = rsi(close, 14) < 30\nlong_exit = rsi(close, 14) > 60\n", ohlcv)
     assert all(math.isfinite(e[1]) for e in r.equity)
