@@ -45,11 +45,15 @@ manual installs.
   computer is downloaded, checked against the release's checksums, your data is backed up first,
   then the update installs.
 - **Network access** for phones and tablets is a switch in Settings → Devices, and uses HTTPS.
+- **Charts:** compare another symbol (percentage change, own pane), keyboard shortcuts (press ? on a
+  chart), and saved chart templates.
+- **AI failover:** if a provider does not answer, your other enabled providers are tried, local ones
+  first; a free local request never turns into a paid one unless you allow it.
 
 ## Tested how
 
 Automated, on 2026-11-22:
-- 329 automated tests pass, plus live-network tests.
+- 330 automated tests pass, plus live-network tests.
 - 13/13 browser end-to-end tests pass.
 - The build pipeline installs each desktop package on a fresh GitHub-hosted machine and smoke-tests
   the installed app: open → background service → interface → API → restart → quit. This ran on

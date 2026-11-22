@@ -19,7 +19,7 @@ ones that are not built.
 L = live-network tests (`OMOS_RUN_NETWORK=1`), E = browser end-to-end tests (`scripts/e2e.sh`),
 R = release check (`scripts/verify_release.sh`), M = manual check this session,
 C = CI on GitHub-hosted machines (`.github/workflows/omos-build.yml`): build, install, smoke test, update, uninstall.
-Latest results (0.2.0): 329 pytest cases passed offline (plus network tests), 13/13 browser E2E, CI green on
+Latest results (0.2.0): 330 pytest cases passed offline (plus network tests), 13/13 browser E2E, CI green on
 Windows x64, macOS arm64 and x86_64, Linux x86_64 and arm64, and Android (emulator end-to-end).
 
 ## Platform and architecture
@@ -60,14 +60,14 @@ Windows x64, macOS arm64 and x86_64, Linux x86_64 and arm64, and Android (emulat
 | 1m … 1M timeframes, custom aggregations (e.g. 45m, 3h, 3d) | VERIFIED | U (aggregation, partial-bucket flag), L |
 | Zoom, pan, scroll, crosshair, auto/manual scale | IMPLEMENTED | KLineChart built-ins |
 | Log and percentage scales | IMPLEMENTED | Scale selector |
-| Compare symbols / symbol overlays | NOT STARTED | |
+| Compare symbols / symbol overlays | VERIFIED | E: another instrument's % change in its own pane, aligned by bar time, saved with the workspace |
 | Multi-chart layouts 1/2/3/4/6/8 and custom grids up to 16 | VERIFIED | E (4-chart layout) |
 | Crosshair / symbol / timeframe / range sync | IMPLEMENTED | Sync toggles; not E2E-asserted |
 | Full-screen, PNG snapshot | IMPLEMENTED | |
 | Data export from a chart | NOT STARTED | Exports exist for screener results and fills |
-| Saved chart templates | PARTIAL | Stored via API (`/api/chart_templates`); no UI yet |
+| Saved chart templates | VERIFIED | E: save, apply, delete indicator sets and chart style |
 | Layout persistence (symbol, timeframe, indicators, drawings) | VERIFIED | E (survives reload); regression for a bug that dropped indicators |
-| Keyboard shortcuts | NOT STARTED | Only `Esc` closes dialogs |
+| Keyboard shortcuts | VERIFIED | E: + / − zoom, arrows scroll, End latest bar, / change symbol, ? help, Esc |
 | Touch gestures | IMPLEMENTED | KLineChart touch support; untested on a real device |
 | Drawing tools: trend line, ray, extended line, horizontal/vertical line, price label, parallel channel, price channel, regression channel (±2σ), Fibonacci retracement and extension, pitchfork, rectangle, circle, triangle, arrow, long/short position (risk/reward), measure, text note, brush | IMPLEMENTED | 21 tools; horizontal line is E2E-tested end to end |
 | Ellipse, polygon, Fibonacci fan, Fibonacci time tools, drawing groups, drawing templates | NOT STARTED | |
@@ -226,7 +226,8 @@ Windows x64, macOS arm64 and x86_64, Linux x86_64 and arm64, and Android (emulat
 | Debate with supervisor consensus and agreement ratio | TESTED | Mock |
 | Tool calling with permission levels (read / analyze / propose) | VERIFIED | U, including prompt-injection tests |
 | Token and cost tracking, daily budget for hosted providers | VERIFIED | U |
-| Agent memory, provider fallback / routing | NOT STARTED | |
+| Provider failover (local first; free never silently becomes paid) | VERIFIED | I |
+| Agent memory | NOT STARTED | |
 
 ## 17. MCP
 

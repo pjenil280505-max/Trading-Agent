@@ -13,7 +13,7 @@ Date: 2026-11-22 · Source: `open-market-os/` on branch `ccr-80d6e707-jb6y48` ·
 What it is **not**:
 - It cannot trade real money: there is no live broker or MetaTrader 5 connection.
 - No person has yet used the installers on a home computer or a physical phone.
-- 25 of 183 tracked features are not started.
+- 23 of 184 tracked features are not started.
 
 ## DOWNLOAD
 
@@ -68,6 +68,7 @@ checks the data sources, offers free local AI and sets start-at-sign-in and keep
 | Live data | WebSocket streams (Coinbase, Kraken, Binance, OKX), LIVE / LIVE·poll / STALE / UNAVAILABLE labels | Unit tests; real ticks from Kraken and Coinbase |
 | Layered entries | Adaptive ladders from risk budget and volatility, all-or-nothing basket risk, trailing stops | Unit tests; 11-scenario simulator |
 | Bot safety | Stops work during circuit-breaker halts; no stuck orders on broker failure; auto-resume after data outages | Simulator scenarios, unit tests |
+| Charts and AI | Compare symbols, keyboard shortcuts, chart templates; AI provider failover (free never silently becomes paid) | Browser E2E; integration tests |
 | Backups and updates | Restore from the app (undoable); verified in-app updates with backup first | Integration tests (fake release server) |
 | Build pipeline | Tests + E2E, 5 desktop builds with install tests, Android with emulator test, draft release with checksums | Green run on 2026-11-22 |
 
@@ -75,7 +76,7 @@ checks the data sources, offers free local AI and sets start-at-sign-in and keep
 
 | Check | Result |
 |---|---|
-| `pytest` (offline) | 329 passed, 15 skipped (network tests) |
+| `pytest` (offline) | 330 passed, 15 skipped (network tests) |
 | Network tests incl. live streams | Kraken and Coinbase streams, data providers: passed |
 | Browser end-to-end (`scripts/e2e.sh`) | 13/13 |
 | CI: Windows x64 | build, smoke test, install, installed smoke test, update while running, uninstall (data kept): passed |
@@ -85,20 +86,20 @@ checks the data sources, offers free local AI and sets start-at-sign-in and keep
 
 ### Feature matrix
 
-183 items ([FEATURE_MATRIX.md](FEATURE_MATRIX.md)):
+184 items ([FEATURE_MATRIX.md](FEATURE_MATRIX.md)):
 
 | VERIFIED | TESTED | IMPLEMENTED | PARTIAL | NOT STARTED | NOT SUPPORTED | BLOCKED |
 |---|---|---|---|---|---|---|
-| 91 | 21 | 21 | 18 | 25 | 7 | 0 |
+| 95 | 21 | 21 | 17 | 23 | 7 | 0 |
 
 ### Not done, and why
 
 | Item | State | Why / what it needs |
 |---|---|---|
 | MetaTrader 5 and exchange live-trading adapters | NOT STARTED | Needs your MT5 terminal and demo account, or exchange testnet API keys, to build against and verify; claiming an untested broker connection would be unsafe |
-| Charts: compare symbols, bar replay, Renko / point & figure, keyboard shortcuts, templates UI | NOT STARTED / PARTIAL | Not reached in this mission |
+| Charts: bar replay, Renko / point & figure, more drawing tools | NOT STARTED | Not reached in this mission (compare, keyboard shortcuts and chart templates were added) |
 | Visual node editors (strategy, workflows), multi-symbol backtests and bots | NOT STARTED | Not reached |
-| AI: agent memory, provider failover, more agent roles, task queue | NOT STARTED | Not reached; the job system now exists to build the queue on |
+| AI: agent memory, more agent roles, task queue | NOT STARTED | Not reached (provider failover was added); the job system now exists to build the queue on |
 | Fundamental screener filters, non-US fundamentals | NOT SUPPORTED | No free licensed bulk source |
 | Plugin network isolation (OS sandbox) | NOT STARTED | Process plugins can still use the network (see SECURITY_GUIDE) |
 
