@@ -23,6 +23,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+import httpx
 import numpy as np
 
 from omos.ai.providers import AIProviderService
@@ -301,10 +302,34 @@ class AgentService:
         return tool.fn(args)
 
     # -- running agents ------------------------------------------------------------------
+    def _candidates(self, provider_id: int) -> list[int]:
+        """The chosen provider, then (if failover is on) other enabled ones: local ones first. A local provider only
+        fails over to a paid hosted one when the user allowed that (Settings > AI), so a free call never turns paid."""
+        first = self.providers.get(provider_id)
+        if not self.db.get_setting("ai.failover", True):
+            return [provider_id]
+        others = [r for r in self.providers.list() if r["enabled"] and r["id"] != provider_id]
+        local = [r["id"] for r in others if r["is_local"]]
+        hosted = [r["id"] for r in others if not r["is_local"]]
+        allow_hosted = not first["is_local"] or bool(self.db.get_setting("ai.failover_to_hosted", False))
+        return [provider_id] + local + (hosted if allow_hosted else [])
+
     def _ask(self, provider_id: int, role: str, user: str, evidence: dict[str, Any] | None, *, workflow: str) -> dict[str, Any]:
-        client = self.providers.client(provider_id)
         system = SYSTEM.format(title=ROLES[role].split(" — ")[0], role=f"{role}. {ROLES[role]}")
-        res = client.chat(system, [{"role": "user", "content": user}])  # tokens are billed even if parsing fails
+        failures: list[str] = []
+        requested = provider_id
+        for pid in self._candidates(provider_id):
+            try:
+                client = self.providers.client(pid)
+                res = client.chat(system, [{"role": "user", "content": user}])  # tokens are billed even if parsing fails
+                provider_id = pid
+                break
+            except (OmosError, httpx.HTTPError, OSError) as exc:
+                name = self.providers.get(pid)["name"]
+                failures.append(f"{name}: {getattr(exc, 'message', None) or exc}"[:200])
+                log.warning("AI provider %s failed (%s); trying the next one", name, failures[-1])
+        else:
+            raise OmosError("no AI provider answered: " + "; ".join(failures))
         try:
             out = normalise(extract_json(res.text), evidence)
             status = "ok"
@@ -322,6 +347,8 @@ class AgentService:
                         "tokens_in": res.tokens_in if res else 0, "tokens_out": res.tokens_out if res else 0,
                         "cost_usd": round(cost, 6), "latency_ms": round(res.latency_ms, 1) if res else None,
                         "is_local": bool(client.row["is_local"])}
+        if provider_id != requested:
+            out["_meta"]["failover_from"] = failures
         return out
 
     @staticmethod

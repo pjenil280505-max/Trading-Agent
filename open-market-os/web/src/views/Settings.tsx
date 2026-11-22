@@ -280,6 +280,10 @@ function AISettings() {
         <div class="row">{(['read', 'analyze', 'propose'] as const).map((lv) => <label class="row small"><input type="checkbox" checked={levels.includes(lv)} onChange={() => toggle(lv)} />
           {lv === 'read' ? 'read market data' : lv === 'analyze' ? 'run analysis/backtests' : 'propose orders (you approve each one)'}</label>)}</div>
         <p class="small muted">There is no level that lets AI place, modify or cancel orders, change settings or read secrets.</p>
+        <label class="row small"><input type="checkbox" checked={s.data['ai.failover'] ?? true} onChange={(e) => save({ 'ai.failover': (e.target as HTMLInputElement).checked })} />
+          if a provider does not answer, try my other enabled providers (local ones first)</label>
+        <label class="row small"><input type="checkbox" checked={s.data['ai.failover_to_hosted'] ?? false} onChange={(e) => save({ 'ai.failover_to_hosted': (e.target as HTMLInputElement).checked })} />
+          …including paid hosted providers when a free local one fails (off: a free request never becomes a paid one)</label>
         <Field label="Daily budget for hosted providers (USD)"><div class="row"><input type="number" step="0.1" min={0} style="width:90px" value={budget ?? s.data['ai.daily_budget_usd'] ?? 1}
           onInput={(e) => setBudget(Number((e.target as HTMLInputElement).value))} /><Btn sm onClick={() => budget !== null && save({ 'ai.daily_budget_usd': budget })}>Save</Btn></div></Field>
       </Card>}

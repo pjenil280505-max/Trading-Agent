@@ -12,7 +12,7 @@ from helpers import make_stack
 from omos.ai.agents import AgentService, EvidenceBuilder, extract_json, normalise
 from omos.ai.providers import AIProviderService, ChatResult, MockModel
 from omos.automation.workflows import WorkflowEngine
-from omos.errors import PermissionDenied, ValidationError
+from omos.errors import OmosError, PermissionDenied, ValidationError
 from omos.mcp.client import MCPClientService
 from omos.plugins.manager import PluginManager, validate_manifest
 from omos.security.secrets import SecretStore
@@ -328,3 +328,25 @@ def test_condition_stops_chain_and_live_orders_refused(st):
                                             "side": "buy", "qty": 1}]})
     r2 = eng.run(w2["id"])
     assert r2["status"] == "failed" and r2["log"][0]["status"] == "denied"
+
+
+def test_ai_failover_to_another_provider_never_turns_free_into_paid(st):
+    dead = st.ai.add("dead local", "ollama", base_url="http://127.0.0.1:1/v1", model="x")  # nothing listens on port 1
+    st.ai.set_enabled(dead["id"], True)
+    mock = st.ai.add("mock", "mock")
+    st.ai.set_enabled(mock["id"], True)
+    out = st.agents.analyze(dead["id"], "TEST:ABC", timeframe="1m")["result"]
+    assert out["_meta"]["provider"] == "mock" and "dead local" in out["_meta"]["failover_from"][0]
+    run = st.db.query_one("SELECT provider_id FROM ai_runs ORDER BY id DESC LIMIT 1")
+    assert run["provider_id"] == mock["id"]  # the run is recorded against the provider that answered
+    st.db.set_setting("ai.failover", False)
+    with pytest.raises(OmosError, match="no AI provider answered"):
+        st.agents.analyze(dead["id"], "TEST:ABC", timeframe="1m")
+    st.db.set_setting("ai.failover", True)
+    # a hosted (paid) provider is only a fallback for a local one when explicitly allowed
+    st.ai.set_enabled(mock["id"], False)
+    paid = st.ai.add("paid", "openai", model="gpt-x", api_key="sk-test")
+    st.db.execute("UPDATE ai_providers SET enabled = 1 WHERE id = ?", (paid["id"],))
+    assert paid["id"] not in st.agents._candidates(dead["id"])
+    st.db.set_setting("ai.failover_to_hosted", True)
+    assert paid["id"] in st.agents._candidates(dead["id"])

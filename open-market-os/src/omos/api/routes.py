@@ -62,13 +62,14 @@ def system_meta(info=Depends(READ)):
 def get_settings(request: Request, info=Depends(READ)):
     db = H(request).db
     keys = ["ui", "data.poll_seconds", "notify.desktop", "automation.enabled", "ai.tool_levels", "ai.daily_budget_usd",
-            "trading.live_enabled", "backup.auto", "backup.keep", "sec.contact", "data.providers"]
+            "trading.live_enabled", "backup.auto", "backup.keep", "sec.contact", "data.providers", "ai.failover",
+            "ai.failover_to_hosted", "data.streaming"]
     return {k: db.get_setting(k) for k in keys}
 
 
 SETTABLE = {"ui": dict, "data.poll_seconds": (int, float), "notify.desktop": bool, "automation.enabled": bool,
             "ai.tool_levels": list, "ai.daily_budget_usd": (int, float), "backup.auto": bool, "backup.keep": int,
-            "sec.contact": str}
+            "sec.contact": str, "ai.failover": bool, "ai.failover_to_hosted": bool, "data.streaming": bool}
 
 
 @router.put("/settings")
